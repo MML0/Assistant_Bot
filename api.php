@@ -1,5 +1,6 @@
 <?php
 $config = require 'config.php';
+use OpenAI\Client;
 
 // Connect to DB
 try {
@@ -15,17 +16,7 @@ try {
 
 // System prompt
 $system_prompt = <<<EOT
-You are an AI with special abilities in a Windows environment. You can:
-1. Execute Windows command-line instructions (e.g., `cmd`, `powershell`) and show the output.
-2. Run system commands, such as checking directories, listing files, and retrieving system information.
-3. Provide feedback on Windows system structures and commands.
-
-When the user asks a question, you need to:
-1. Identify the relevant command to run.
-2. Indicate what you're going to run using <run> and <run/> tags.
-3. Show the output result using <out> and <out/> tags.
-
-Only execute one action at a time. Always wait for the user’s confirmation before proceeding.
+You are an AI be help full
 EOT;
 
 // Get incoming Telegram message
@@ -71,7 +62,7 @@ if (!$is_pro) {
     $stmt->execute([$user_id]);
     $count_today = $stmt->fetchColumn();
 
-    if ($count_today >= 3) {
+    if ($count_today >= 13) {
         sendTelegramMessage($chat_id, "You reached your daily limit of 3 messages. Buy the pro plan to continue.");
         exit;
     }
@@ -106,56 +97,28 @@ sendTelegramMessage($chat_id, $gpt_reply);
 
 // ----------------- Functions -----------------
 
+
 function sendToGPT($message_history, $model = "gpt-4.1-mini") {
     global $config;
 
     $api_key = $config['gpt']['api_key'];
-    $url = $config['gpt']['base_url'] . "/session";
 
-    // Create session
-    $session_data = [
-        "user" => ["id" => uniqid()],
-        "model" => $model,              // <-- specify model here
-        "initialMessages" => []
-    ];
+    // Initialize OpenAI client
+    $client = \OpenAI::client($api_key);
 
-    $ch = curl_init($url);
-    curl_setopt($ch, CURLOPT_HTTPHEADER, [
-        "Authorization: Bearer $api_key",
-        "Content-Type: application/json"
+    // Combine all messages into a single input string
+    $input_text = implode("\n", $message_history);
+
+    // Send request using the Responses API
+    $response = $client->responses()->create([
+        'model' => $model,
+        'input' => $input_text,
     ]);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($session_data));
-    $response = curl_exec($ch);
-    curl_close($ch);
 
-    $session = json_decode($response, true);
-    $session_id = $session['id'] ?? null;
-    if (!$session_id) return "Error: Cannot create GPT session.";
-
-    // Send message
-    $msg_url = $config['gpt']['base_url'] . "/session/$session_id/message";
-    $msg_data = [
-        "message" => [
-            "content" => implode("\n", $message_history),
-            "type" => "USER",
-            "model" => $model        // <-- or specify model per message if API supports
-        ]
-    ];
-
-    $ch = curl_init($msg_url);
-    curl_setopt($ch, CURLOPT_HTTPHEADER, [
-        "Authorization: Bearer $api_key",
-        "Content-Type: application/json"
-    ]);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($msg_data));
-    $msg_response = curl_exec($ch);
-    curl_close($ch);
-
-    $msg_json = json_decode($msg_response, true);
-    return $msg_json['messages'][0]['content'] ?? "No reply from GPT.";
+    // Return the output text
+    return $response->outputText ?? "No reply from GPT.";
 }
+
 
 
 function sendTelegramMessage($chat_id, $text) {

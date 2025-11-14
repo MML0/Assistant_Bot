@@ -2,3 +2,4 @@ config.php
 .vscode
 .vscode/*
 .vscode/sftp.json
+vendor/*
