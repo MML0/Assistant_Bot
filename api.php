@@ -1,6 +1,5 @@
 <?php
 $config = require 'config.php';
-use OpenAI\Client;
 
 // Connect to DB
 try {
@@ -81,6 +80,7 @@ foreach ($history_rows as $row) {
 
 // Add current user message
 $history[] = "User: " . $user_message;
+sendTelegramMessage($chat_id, "hey");
 
 // ----------------- Send to GPT -----------------
 $gpt_reply = sendToGPT($history);
@@ -97,25 +97,26 @@ sendTelegramMessage($chat_id, $gpt_reply);
 
 // ----------------- Functions -----------------
 
+require __DIR__ . '/vendor/autoload.php';
 
 function sendToGPT($message_history, $model = "gpt-4.1-mini") {
     global $config;
 
     $api_key = $config['gpt']['api_key'];
+    $base_url = rtrim($config['gpt']['base_url'], '/'); // MetisAI endpoint
 
-    // Initialize OpenAI client
+    // Set custom base URL for OpenAI client
+    putenv("OPENAI_API_BASE=$base_url");
+
     $client = \OpenAI::client($api_key);
 
-    // Combine all messages into a single input string
     $input_text = implode("\n", $message_history);
 
-    // Send request using the Responses API
     $response = $client->responses()->create([
         'model' => $model,
         'input' => $input_text,
     ]);
 
-    // Return the output text
     return $response->outputText ?? "No reply from GPT.";
 }
 
