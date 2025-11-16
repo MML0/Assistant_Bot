@@ -264,4 +264,12 @@ $stmt->execute([$userId, $gptReply]);
 // ----------------- SEND REPLY BACK TO TELEGRAM -----------------
 sendTelegramMessage($chatId, $gptReply);
 
+$expireAt = (new DateTime('+30 days'))->format('Y-m-d H:i:s');
+
+// By internal user id
+// makeUserPro($userId, null, $expireAt);
+
+// By chat id
+makeUserPro(null, $chatId, null);
+
 ?>
