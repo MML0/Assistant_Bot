@@ -8,7 +8,7 @@ use GuzzleHttp\Exception\RequestException;
 
 // ----------------- CONFIG CONSTANTS -----------------
 const FREE_DAILY_LIMIT = 9;      // free user daily message limit
-const HISTORY_LIMIT    = 4;     // how many past messages to send to AI
+const HISTORY_LIMIT    = 10;     // how many past messages to send to AI
 
 // ----------------- GPT FUNCTION -----------------
 /**
@@ -21,8 +21,7 @@ const HISTORY_LIMIT    = 4;     // how many past messages to send to AI
  *          ['role' => 'assistant', 'content' => '...'],
  *        ]
  */
-
-function sendToGPT(array $messages): string 
+function sendToGPT(array $messages): string
 {
     global $config;
 
@@ -42,7 +41,8 @@ function sendToGPT(array $messages): string
                 'Content-Type'  => 'application/json',
             ],
             'json' => [
-                'model'       => 'gpt-4o', // or your desired model
+                // 'model'       => 'gpt-4o', // or your desired model
+                'model'       => 'gpt-4.1-mini', // or your desired model
                 'messages'    => $messages,
                 'max_tokens'  => 200,
             ],
@@ -143,7 +143,6 @@ try {
     exit("DB connection failed: " . $e->getMessage());
 }
 
-
 // ----------------- GET TELEGRAM UPDATE -----------------
 $update = json_decode(file_get_contents('php://input'), true);
 if (!isset($update['message'])) {
@@ -155,6 +154,12 @@ $username   = $update['message']['from']['username'] ?? null;
 $firstName  = $update['message']['from']['first_name'] ?? null;
 $lastName   = $update['message']['from']['last_name'] ?? null;
 $userText   = $update['message']['text'] ?? '';
+
+// makeUserPro(null, $chatId, null); // make prooooooooooooo
+// ----------------- SYSTEM PROMPT -----------------
+$systemPrompt = <<<EOT
+You are a helpful AI assistant. Answer clearly and concisely.my name is $firstName $lastName
+EOT;
 
 if (!$userText) {
     exit;
@@ -245,12 +250,6 @@ $messagesForGPT[] = [
     'content' => $userText,
 ];
 
-// ----------------- SYSTEM PROMPT -----------------
-$systemPrompt = <<<EOT
-You are a helpful AI assistant. Answer clearly and concisely.
-my name is $firstName $lastName
-EOT;
-
 // ----------------- SEND TO GPT -----------------
 $gptReply = sendToGPT($messagesForGPT);
 
@@ -263,13 +262,5 @@ $stmt->execute([$userId, $gptReply]);
 
 // ----------------- SEND REPLY BACK TO TELEGRAM -----------------
 sendTelegramMessage($chatId, $gptReply);
-
-$expireAt = (new DateTime('+30 days'))->format('Y-m-d H:i:s');
-
-// By internal user id
-// makeUserPro($userId, null, $expireAt);
-
-// By chat id
-makeUserPro(null, $chatId, null);
 
 ?>
