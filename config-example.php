@@ -16,7 +16,6 @@ return [
     'gpt' => [
         'api_key' => 'YOUR_METIS_API_KEY',
         'base_url' => 'https://api.metisai.ir/api/v1/chat',
-        'bot_id' => 'YOUR_BOT_ID'
     ]
 ];
 ?>

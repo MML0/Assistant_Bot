@@ -1,5 +1,66 @@
 <?php
-$config = require 'config.php';
+$config = require __DIR__ . '/config.php';
+require __DIR__ . '/vendor/autoload.php';
+
+use GuzzleHttp\Client;
+use GuzzleHttp\Exception\RequestException;
+
+function sendToGPT($input): string{
+    global $config;
+
+    $apiKey  = $config['gpt']['api_key'];
+    $baseUrl = rtrim($config['gpt']['base_url'], '/'); // https://api.metisai.ir/openai/v1
+
+    $client = new Client([
+        'base_uri' => $baseUrl . '/', // -> https://api.metisai.ir/openai/v1/
+        'timeout'  => 30,
+    ]);
+
+    // 👇 If it's an array, just join everything with newlines
+    if (is_array($input)) {
+        $message = implode("\n", $input);
+    } else {
+        $message = (string) $input;
+    }
+
+    try {
+        // POST https://api.metisai.ir/openai/v1/chat/completions
+        $response = $client->post('chat/completions', [
+            'headers' => [
+                'Authorization' => 'Bearer ' . $apiKey,
+                'Accept'        => 'application/json',
+                'Content-Type'  => 'application/json',
+            ],
+            'json' => [
+                'model'    => 'gpt-4o', // or 'gpt-4o-mini' or whatever Metis gives you
+                'messages' => [
+                    ['role' => 'user', 'content' => $message],
+                ],
+                'max_tokens' => 200,
+            ],
+        ]);
+
+        $body = (string) $response->getBody();
+        $data = json_decode($body, true);
+
+        if (isset($data['choices'][0]['message']['content'])) {
+            return $data['choices'][0]['message']['content'];
+        }
+
+        return 'No text in response. Raw body: ' . $body;
+
+    } catch (RequestException $e) {
+        if ($e->hasResponse()) {
+            $status  = $e->getResponse()->getStatusCode();
+            $content = (string) $e->getResponse()->getBody();
+            return "HTTP error {$status}: {$content}";
+        }
+        return 'Request error: ' . $e->getMessage();
+    } catch (\Throwable $e) {
+        return 'Unexpected error: ' . $e->getMessage();
+    }
+}
+
 
 // Connect to DB
 try {
@@ -61,7 +122,7 @@ if (!$is_pro) {
     $stmt->execute([$user_id]);
     $count_today = $stmt->fetchColumn();
 
-    if ($count_today >= 13) {
+    if ($count_today >= 9) {
         sendTelegramMessage($chat_id, "You reached your daily limit of 3 messages. Buy the pro plan to continue.");
         exit;
     }
@@ -80,7 +141,7 @@ foreach ($history_rows as $row) {
 
 // Add current user message
 $history[] = "User: " . $user_message;
-sendTelegramMessage($chat_id, "hey");
+// sendTelegramMessage($chat_id, "hey !");
 
 // ----------------- Send to GPT -----------------
 $gpt_reply = sendToGPT($history);
@@ -95,30 +156,6 @@ $stmt->execute([$user_id, $gpt_reply]);
 // ----------------- Send reply back to Telegram -----------------
 sendTelegramMessage($chat_id, $gpt_reply);
 
-// ----------------- Functions -----------------
-
-require __DIR__ . '/vendor/autoload.php';
-
-function sendToGPT($message_history, $model = "gpt-4.1-mini") {
-    global $config;
-
-    $api_key = $config['gpt']['api_key'];
-    $base_url = rtrim($config['gpt']['base_url'], '/'); // MetisAI endpoint
-
-    // Set custom base URL for OpenAI client
-    putenv("OPENAI_API_BASE=$base_url");
-
-    $client = \OpenAI::client($api_key);
-
-    $input_text = implode("\n", $message_history);
-
-    $response = $client->responses()->create([
-        'model' => $model,
-        'input' => $input_text,
-    ]);
-
-    return $response->outputText ?? "No reply from GPT.";
-}
 
 
 
