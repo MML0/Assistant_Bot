@@ -2,13 +2,15 @@
 
 $config = require __DIR__ . '/config.php';
 require __DIR__ . '/vendor/autoload.php';
+require __DIR__ . '/commands.php';
+require __DIR__ . '/buttons.php';
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 
 // ----------------- CONFIG CONSTANTS -----------------
 const FREE_DAILY_LIMIT = 9;      // free user daily message limit
-const HISTORY_LIMIT    = 8;     // how many past messages to send to AI
+const HISTORY_LIMIT    = 12;     // how many past messages to send to AI
 
 // ----------------- GPT FUNCTION -----------------
 /**
@@ -176,6 +178,13 @@ try {
 
 // ----------------- GET TELEGRAM UPDATE -----------------
 $update = json_decode(file_get_contents('php://input'), true);
+// Handle inline button presses
+if (isset($update['callback_query'])) {
+    if (handleCallback($update)) {
+        exit;
+    }
+}
+
 if (!isset($update['message'])) {
     exit;
 }
@@ -186,37 +195,12 @@ $firstName  = $update['message']['from']['first_name'] ?? null;
 $lastName   = $update['message']['from']['last_name'] ?? null;
 $userText   = $update['message']['text'] ?? '';
 
-// makeUserPro(null, $chatId, null); // make prooooooooooooo
-$userText = $update['message']['text'] ?? '';
 
-// === Secret PRO code: "pro{iran local hour}" ===
-$iranTime = new DateTime('now', new DateTimeZone('Asia/Tehran'));
-$iranHour = $iranTime->format('H');              // e.g. "07", "14"
-$proCode  = 'pro' . ($iranHour*3+4)%30;                  // e.g. "pro07"
 
-if (strtolower(trim($userText)) === $proCode) {
-    // lifetime PRO
-    // makeUserPro(null, $chatId, null);
-    $expireAt = (new DateTime('+7 days'))->format('Y-m-d H:i:s');
-
-    // By internal user id
-    // makeUserPro($userId, null, $expireAt);
-    $expireAt = (new DateTime('+7 days'))->format('Y-m-d H:i:s');
-
-    // By internal user id
-    makeUserPro($userId, null, $expireAt);
-
-    sendTelegramMessage(
-        $chatId,
-        "🎉 Congrats! You’ve unlocked 7-Day PRO!\n\nEnjoy unlimited messages, better memory, and full model access (4.1, 4o, 5, 5.1)."
-
-    );
-
-    exit; // stop further processing for this update
+// Check if message is a command
+if (handleCommand($chatId, $userText)) {
+    exit; // stop further processing
 }
-
-// or by chat id
-// makeUserPro(null, $chatId, $expireAt);
 
 // ----------------- SYSTEM PROMPT -----------------
 $systemPrompt = <<<EOT
@@ -249,6 +233,34 @@ if (!$user) {
     if ($isPro && $proExpire && strtotime($proExpire) < time()) {
         $isPro = 0; // pro expired
     }
+}
+
+// makeUserPro(null, $chatId, null); // make prooooooooooooo
+
+// === Secret PRO code: "pro{iran local hour}" ===
+$iranTime = new DateTime('now', new DateTimeZone('Asia/Tehran'));
+$iranHour = $iranTime->format('H');              // e.g. "07", "14"
+$proCode  = 'pro' . ($iranHour*3+4)%30;                  // e.g. "pro07"
+
+if (strtolower(trim($userText)) === $proCode) {
+    // lifetime PRO
+    // makeUserPro(null, $chatId, null);
+    $expireAt = (new DateTime('+7 days'))->format('Y-m-d H:i:s');
+
+    // By internal user id
+    // makeUserPro($userId, null, $expireAt);
+    $expireAt = (new DateTime('+7 days'))->format('Y-m-d H:i:s');
+
+    // By internal user id
+    makeUserPro($userId, null, $expireAt);
+
+    sendTelegramMessage(
+        $chatId,
+        "🎉 Congrats! You’ve unlocked 7-Day PRO!\n\nEnjoy unlimited messages, better memory, and full model access (4.1, 4o, 5, 5.1)."
+
+    );
+
+    exit; // stop further processing for this update
 }
 
 // ----------------- DAILY MESSAGE LIMIT -----------------
