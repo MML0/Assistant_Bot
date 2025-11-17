@@ -281,12 +281,11 @@ if (!$isPro) {
         sendTelegramMessage(
             $chatId,
             "You reached your daily limit of " . FREE_DAILY_LIMIT . " messages.
-            Upgrade to PRO for:
-            • Consistent long-term chat memory
-            • Unlimited messages
-            • Advanced model selection  4.1, 4o, 5, 5.1 and more. 
-
-            Use /getpro to upgrade.");
+Upgrade to PRO for:
+ • Consistent long-term chat memory 
+ • Unlimited messages
+ • Advanced model selection  4.1, 4o, 5, 5.1 and more. 
+Use /getpro to upgrade.");
         exit;
     }
 }

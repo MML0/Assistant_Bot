@@ -55,7 +55,7 @@ if (str_starts_with($lower, '/start')) {
         );
     } else {
         sendTelegramMessage($chatId,
-            "👋 Welcome! I'm your AI assistant.\nType /help to see commands."
+            "👋 Welcome! I'm your AI assistant.\nType /help to see commands.\n\nAsk anything and I will reply to you! "
         );
     }
 
