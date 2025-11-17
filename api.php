@@ -261,6 +261,16 @@ if (!$user) {
     $userId    = $db->lastInsertId();
     $isPro     = 0;
     $proExpire = null;
+
+    // log to admin
+    $adminChatId = $config['telegram']['admin_chatid'];
+
+    $logText = "New \n"
+        . "User ID: {$userId} "
+        . "Chat ID: {$chatId} "
+        . "Name: {$firstName} {$lastName} "
+        . "Username: @" . ($username ?: '—');
+    sendTelegramMessage($adminChatId, $logText);
 } else {
     $userId    = $user['id'];
     $isPro     = $user['is_pro'];
@@ -293,10 +303,8 @@ if (strtolower(trim($userText)) === $proCode) {
     // By internal user id
     makeUserPro($userId, null, $expireAt);
 
-    sendTelegramMessage(
-        $chatId,
+    sendTelegramMessage( $chatId,
         "🎉 Congrats! You’ve unlocked 7-Day PRO!\n\nEnjoy unlimited messages, better memory, and full model access (4.1, 4o, 5, 5.1)."
-
     );
 
     exit; // stop further processing for this update
@@ -318,10 +326,10 @@ if (!$isPro) {
         sendTelegramMessage(
             $chatId,
             "You reached your daily limit of " . FREE_DAILY_LIMIT . " messages.
-Upgrade to PRO for:
+ Upgrade to PRO for:  
  • Consistent long-term chat memory 
  • Unlimited messages
- • Advanced model selection  4.1, 4o, 5, 5.1 and more. 
+ • Advanced model selection 4.1, 4o, 5 and ... 
 Use /getpro to upgrade.");
         exit;
     }
