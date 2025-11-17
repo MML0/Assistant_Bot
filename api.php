@@ -8,7 +8,7 @@ use GuzzleHttp\Exception\RequestException;
 
 // ----------------- CONFIG CONSTANTS -----------------
 const FREE_DAILY_LIMIT = 9;      // free user daily message limit
-const HISTORY_LIMIT    = 10;     // how many past messages to send to AI
+const HISTORY_LIMIT    = 15;     // how many past messages to send to AI
 
 // ----------------- GPT FUNCTION -----------------
 /**
@@ -173,7 +173,7 @@ $userText   = $update['message']['text'] ?? '';
 // makeUserPro(null, $chatId, null); // make prooooooooooooo
 // ----------------- SYSTEM PROMPT -----------------
 $systemPrompt = <<<EOT
-You are a helpful AI assistant. Answer clearly and concisely.my name is $firstName $lastName
+You are a helpful AI assistant. Answer clearly and concisely.my name is $firstName $lastName say hi 
 EOT;
 
 if (!$userText) {
@@ -231,7 +231,7 @@ $stmt = $db->prepare("
     FROM messages 
     WHERE user_id = ?
     ORDER BY id DESC 
-    LIMIT " . (HISTORY_LIMIT + 10)
+    LIMIT " . (HISTORY_LIMIT + 100)
 );
 $stmt->execute([$userId]);
 $historyRows = array_reverse($stmt->fetchAll(PDO::FETCH_ASSOC));
@@ -240,7 +240,6 @@ $historyRows = array_reverse($stmt->fetchAll(PDO::FETCH_ASSOC));
 // ----------------------------------------------------
 // BUILD CHAT HISTORY FOR GPT (SUMMARY AWARE)
 // ----------------------------------------------------
-
 $messagesForGPT = [
     [
         'role'    => 'system',
@@ -248,45 +247,49 @@ $messagesForGPT = [
     ],
 ];
 
-$flatHistory = [];     // used for summarization limit
-$foundSummary = false; // tracks if a summary block was found
+$flatHistory   = [];
+$foundSummary  = false;
+if ($isPro) {
+    foreach ($historyRows as $row) {
+        // If we detect a summary row → reset and keep ONLY that summary as context
+        if ($row['type'] === 'SUMMARY') {
 
-foreach ($historyRows as $row) {
+            // Reset GPT messages (keep system)
+            $messagesForGPT = [
+                [
+                    'role'    => 'system',
+                    'content' => $systemPrompt,
+                ],
+            ];
 
-    // If we detect a summary row → reset and ignore everything before it
-    if ($row['type'] === 'SUMMARY') {
+            // Reset flat history
+            $flatHistory  = [];
+            $foundSummary = true;
 
-        // Reset GPT message array (keep system prompt only)
-        $messagesForGPT = [
-            [
-                'role'    => 'system',
-                'content' => $systemPrompt,
-            ],
-        ];
+            // ✅ INCLUDE THE SUMMARY ITSELF
+            $messagesForGPT[] = [
+                'role'    => 'assistant',
+                'content' => "Summary of our chat so far: " . $row['message'],
+            ];
+            $flatHistory[] = $row['message'];
 
-        // Reset flat history (summary covers everything before)
-        $flatHistory = [];
+            continue;
+        }
 
-        // Mark that we are now only reading *after* the summary
-        $foundSummary = true;
+        if ($row['type'] === 'USER') {
+            $messagesForGPT[] = [
+                'role'    => 'user',
+                'content' => $row['message'],
+            ];
+            $flatHistory[] = $row['message'];
 
-        continue;
-    }
-
-    // ONLY include messages AFTER the last summary
-    if ($row['type'] === 'USER') {
-        $messagesForGPT[] = [
-            'role'    => 'user',
-            'content' => $row['message'],
-        ];
-        $flatHistory[] = $row['message'];
-
-    } elseif ($row['type'] === 'AI') {
-        $messagesForGPT[] = [
-            'role'    => 'assistant',
-            'content' => $row['message'],
-        ];
-        $flatHistory[] = $row['message'];
+        } elseif ($row['type'] === 'AI') {
+            $messagesForGPT[] = [
+                'role'    => 'assistant',
+                'content' => $row['message'],
+            ];
+            $flatHistory[] = $row['message'];
+        }
     }
 }
 
@@ -325,6 +328,7 @@ if (count($flatHistory) > HISTORY_LIMIT) {
         ],
     ];
 }
+
 
 
 

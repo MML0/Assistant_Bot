@@ -9,9 +9,25 @@ try {
     );
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // Users table
+    echo "Starting fresh migration...\n";
+
+    // ------------------------------
+    // DROP OLD TABLES SAFELY
+    // ------------------------------
+    $db->exec("SET FOREIGN_KEY_CHECKS = 0;");
+
+    $db->exec("DROP TABLE IF EXISTS messages;");
+    $db->exec("DROP TABLE IF EXISTS users;");
+
+    $db->exec("SET FOREIGN_KEY_CHECKS = 1;");
+
+    echo "Old tables dropped.\n";
+
+    // ------------------------------
+    // CREATE USERS TABLE
+    // ------------------------------
     $sql_users = "
-    CREATE TABLE IF NOT EXISTS users (
+    CREATE TABLE users (
         id INT AUTO_INCREMENT PRIMARY KEY,
         chat_id BIGINT NOT NULL UNIQUE,
         username VARCHAR(255),
@@ -25,10 +41,13 @@ try {
     ";
 
     $db->exec($sql_users);
+    echo "Users table created.\n";
 
-    // Messages table
+    // ------------------------------
+    // CREATE MESSAGES TABLE
+    // ------------------------------
     $sql_messages = "
-    CREATE TABLE IF NOT EXISTS messages (
+    CREATE TABLE messages (
         id INT AUTO_INCREMENT PRIMARY KEY,
         user_id INT NOT NULL,
         message TEXT NOT NULL,
@@ -39,9 +58,9 @@ try {
     ";
 
     $db->exec($sql_messages);
+    echo "Messages table created.\n";
 
-    echo "Migration completed successfully!";
+    echo "Fresh migration completed successfully!";
 } catch (PDOException $e) {
-    echo "Error: " . $e->getMessage();
+    echo "Migration error: " . $e->getMessage();
 }
-?>
