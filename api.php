@@ -90,7 +90,7 @@ function summarize_history(array $messageHistory): string
 {
     // Build a single prompt like in your Python version
     $prompt = implode("\n", $messageHistory)
-        . "\nChatbot: Please summarize the conversation so far, focusing on the key details and important points. "
+        . "\nChatbot: Please shortly summarize the conversation so far, focusing on the key details and important points. "
         . "Ensure that no critical information is lost and that the summary preserves the meaning and flow of the conversation.";
 
     // Use your chat API function (expects role-based messages)
@@ -119,20 +119,56 @@ function makeUserPro(?int $userId = null, $chatId = null, ?string $expireAt = nu
         return false; // need at least one identifier
     }
 
-    // Decide which column to use
+    // Load user
     if ($userId !== null) {
-        $sql  = "UPDATE users SET is_pro = 1, pro_expire = :expireAt WHERE id = :id";
-        $params = [
-            ':expireAt' => $expireAt,
-            ':id'       => $userId,
-        ];
+        $stmt = $db->prepare("SELECT id, is_pro, pro_expire FROM users WHERE id = ?");
+        $stmt->execute([$userId]);
     } else {
-        $sql  = "UPDATE users SET is_pro = 1, pro_expire = :expireAt WHERE chat_id = :chatId";
-        $params = [
-            ':expireAt' => $expireAt,
-            ':chatId'   => $chatId,
-        ];
+        $stmt = $db->prepare("SELECT id, is_pro, pro_expire FROM users WHERE chat_id = ?");
+        $stmt->execute([$chatId]);
     }
+
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$user) {
+        return false;
+    }
+
+    $userId = (int)$user['id'];
+
+    // 1) Lifetime PRO already → don't touch it
+    if ((int)$user['is_pro'] === 1 && empty($user['pro_expire'])) {
+        return true;
+    }
+
+    // 2) Compute new expiry
+    $newExpire = $expireAt; // default: just use given value
+
+    if ($expireAt !== null) {
+        // duration we are adding (in seconds)
+        $now       = time();
+        $targetTs  = strtotime($expireAt);
+        $duration  = max(0, $targetTs - $now); // avoid negative
+
+        // base = existing pro_expire (if future) or now
+        if (!empty($user['pro_expire'])) {
+            $current = strtotime($user['pro_expire']);
+            $base    = max($current, $now);
+        } else {
+            $base = $now;
+        }
+
+        $newExpire = date('Y-m-d H:i:s', $base + $duration);
+    } else {
+        // expireAt null => upgrade to lifetime (unless already lifetime, which we handled above)
+        $newExpire = null;
+    }
+
+    // 3) Update record
+    $sql = "UPDATE users SET is_pro = 1, pro_expire = :expireAt WHERE id = :id";
+    $params = [
+        ':expireAt' => $newExpire,
+        ':id'       => $userId,
+    ];
 
     $stmt = $db->prepare($sql);
     $stmt->execute($params);

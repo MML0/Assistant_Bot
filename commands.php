@@ -1,7 +1,7 @@
 <?php
 
 function handleCommand($chatId, $userText) {
-    global $db, $user, $config; // FIXED — add globals
+    global $db, $user, $config; 
     $lower = strtolower(trim($userText));
 
 // ----- /start -----
@@ -51,7 +51,7 @@ if (str_starts_with($lower, '/start')) {
     // ---- Greeting the new user ----
     if ($referrer) {
         sendTelegramMessage($chatId,
-            "👋 Welcome! Referral detected.\nYou're now connected — enjoy chatting!"
+            "👋 Welcome! Referral detected.\n\nType /help to see commands.\n\nAsk anything and I will reply to you! "
         );
     } else {
         sendTelegramMessage($chatId,
