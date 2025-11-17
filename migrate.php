@@ -19,6 +19,7 @@ try {
         last_name VARCHAR(255),
         is_pro TINYINT(1) DEFAULT 0,
         pro_expire DATE DEFAULT NULL,
+        model VARCHAR(50) NOT NULL DEFAULT 'gpt-4.1-mini',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     ";
@@ -31,7 +32,7 @@ try {
         id INT AUTO_INCREMENT PRIMARY KEY,
         user_id INT NOT NULL,
         message TEXT NOT NULL,
-        type ENUM('USER', 'AI') NOT NULL,
+        type ENUM('USER','AI','SUMMARY') NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

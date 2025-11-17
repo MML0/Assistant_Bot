@@ -21,8 +21,7 @@ const HISTORY_LIMIT    = 10;     // how many past messages to send to AI
  *          ['role' => 'assistant', 'content' => '...'],
  *        ]
  */
-function sendToGPT(array $messages): string
-{
+function sendToGPT(array $messages): string{
     global $config;
 
     $apiKey  = $config['gpt']['api_key'];
@@ -30,7 +29,7 @@ function sendToGPT(array $messages): string
 
     $client = new Client([
         'base_uri' => $baseUrl . '/',
-        'timeout'  => 30,
+        'timeout'  => 3,
     ]);
 
     try {
@@ -67,6 +66,22 @@ function sendToGPT(array $messages): string
     } catch (\Throwable $e) {
         return 'Unexpected error: ' . $e->getMessage();
     }
+}
+// Summarize the current history using GPT
+function summarize_history(array $messageHistory): string
+{
+    // Build a single prompt like in your Python version
+    $prompt = implode("\n", $messageHistory)
+        . "\nChatbot: Please summarize the conversation so far, focusing on the key details and important points. "
+        . "Ensure that no critical information is lost and that the summary preserves the meaning and flow of the conversation.";
+
+    // Use your chat API function (expects role-based messages)
+    $messages = [
+        ['role' => 'system', 'content' => 'You are a helpful assistant that summarizes conversations.'],
+        ['role' => 'user',   'content' => $prompt],
+    ];
+
+    return sendToGPT($messages);
 }
 /**
  * Make a user PRO by internal user ID or Telegram chat ID.
@@ -216,12 +231,16 @@ $stmt = $db->prepare("
     FROM messages 
     WHERE user_id = ?
     ORDER BY id DESC 
-    LIMIT " . HISTORY_LIMIT
+    LIMIT " . (HISTORY_LIMIT + 10)
 );
 $stmt->execute([$userId]);
 $historyRows = array_reverse($stmt->fetchAll(PDO::FETCH_ASSOC));
 
-// Start messages array with system prompt
+
+// ----------------------------------------------------
+// BUILD CHAT HISTORY FOR GPT (SUMMARY AWARE)
+// ----------------------------------------------------
+
 $messagesForGPT = [
     [
         'role'    => 'system',
@@ -229,26 +248,85 @@ $messagesForGPT = [
     ],
 ];
 
-// Add previous conversation
+$flatHistory = [];     // used for summarization limit
+$foundSummary = false; // tracks if a summary block was found
+
 foreach ($historyRows as $row) {
+
+    // If we detect a summary row → reset and ignore everything before it
+    if ($row['type'] === 'SUMMARY') {
+
+        // Reset GPT message array (keep system prompt only)
+        $messagesForGPT = [
+            [
+                'role'    => 'system',
+                'content' => $systemPrompt,
+            ],
+        ];
+
+        // Reset flat history (summary covers everything before)
+        $flatHistory = [];
+
+        // Mark that we are now only reading *after* the summary
+        $foundSummary = true;
+
+        continue;
+    }
+
+    // ONLY include messages AFTER the last summary
     if ($row['type'] === 'USER') {
         $messagesForGPT[] = [
             'role'    => 'user',
             'content' => $row['message'],
         ];
-    } else { // 'AI'
+        $flatHistory[] = $row['message'];
+
+    } elseif ($row['type'] === 'AI') {
         $messagesForGPT[] = [
             'role'    => 'assistant',
             'content' => $row['message'],
         ];
+        $flatHistory[] = $row['message'];
     }
 }
 
-// Add current user message at the end
+// Add current user message
 $messagesForGPT[] = [
     'role'    => 'user',
     'content' => $userText,
 ];
+$flatHistory[] = $userText;
+
+// ----------------------------------------------------
+// AUTO-SUMMARIZE IF HISTORY > HISTORY_LIMIT
+// ----------------------------------------------------
+
+if (count($flatHistory) > HISTORY_LIMIT) {
+
+    $summary = summarize_history($flatHistory);
+
+    // Save summary marker in DB
+    $stmt = $db->prepare("INSERT INTO messages (user_id, message, type) VALUES (?, ?, 'SUMMARY')");
+    $stmt->execute([$userId, $summary]);
+
+    // Reset GPT context using the new summary
+    $messagesForGPT = [
+        [
+            'role'    => 'system',
+            'content' => $systemPrompt,
+        ],
+        [
+            'role'    => 'assistant',
+            'content' => "Summary of our chat so far: " . $summary
+        ],
+        [
+            'role'    => 'user',
+            'content' => "Continuing: " . $userText
+        ],
+    ];
+}
+
+
 
 // ----------------- SEND TO GPT -----------------
 $gptReply = sendToGPT($messagesForGPT);
