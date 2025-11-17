@@ -233,10 +233,6 @@ $userText   = $update['message']['text'] ?? '';
 
 
 
-// Check if message is a command
-if (handleCommand($chatId, $userText)) {
-    exit; // stop further processing
-}
 
 // ----------------- SYSTEM PROMPT -----------------
 $systemPrompt = <<<EOT
@@ -251,6 +247,11 @@ if (!$userText) {
 $stmt = $db->prepare("SELECT * FROM users WHERE chat_id = ?");
 $stmt->execute([$chatId]);
 $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+// Check if message is a command
+if (handleCommand($chatId, $userText)) {
+    exit; // stop further processing
+}
 
 if (!$user) {
     // New user
