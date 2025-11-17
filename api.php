@@ -220,6 +220,7 @@ if (!$user) {
     // New user
     $stmt = $db->prepare("INSERT INTO users (chat_id, username, first_name, last_name) VALUES (?, ?, ?, ?)");
     $stmt->execute([$chatId, $username, $firstName, $lastName]);
+    $userModel = '4.1-mini'; // gpt-4.1-mini (default) or selected model
 
     $userId    = $db->lastInsertId();
     $isPro     = 0;
@@ -228,6 +229,7 @@ if (!$user) {
     $userId    = $user['id'];
     $isPro     = $user['is_pro'];
     $proExpire = $user['pro_expire'];
+    $userModel = $user['model']; // gpt-4.1-mini (default) or selected model
 
     // Pro expiration check
     if ($isPro && $proExpire && strtotime($proExpire) < time()) {

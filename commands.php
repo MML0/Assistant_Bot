@@ -74,23 +74,34 @@ if (str_starts_with($lower, '/start')) {
         return true;
     }
 
-    // ----- /setmodel -----
-    if ($lower === '/setmodel') {
+// ----- /setmodel -----
+if ($lower === '/setmodel') {
 
-        $buttons = [
-            [
-                ['text' => '⚡ 4.1-mini', 'callback_data' => 'setmodel_gpt-4.1-mini'],
-                ['text' => '🤖 4o',        'callback_data' => 'setmodel_gpt-4o']
-            ],
-            [
-                ['text' => '🚀 5',         'callback_data' => 'setmodel_gpt-5'],
-                ['text' => '🧠 5.1',       'callback_data' => 'setmodel_gpt-5.1']
-            ]
-        ];
+    $buttons = [
+        [
+            ['text' => '🌐 gpt-4',        'callback_data' => 'setmodel_gpt-4'],
+            ['text' => '🤖 gpt-4o',       'callback_data' => 'setmodel_gpt-4o'],
+        ],
+        [
+            ['text' => '⚡ gpt-4o-mini',  'callback_data' => 'setmodel_gpt-4o-mini'],
+            ['text' => '🚀 gpt-4.1',      'callback_data' => 'setmodel_gpt-4.1'],
+        ],
+        [
+            ['text' => '⚡ gpt-4.1-mini', 'callback_data' => 'setmodel_gpt-4.1-mini'],
+            ['text' => '🧩 gpt-4.1-nano', 'callback_data' => 'setmodel_gpt-4.1-nano'],
+        ],
+        [
+            ['text' => '🛸 gpt-5',        'callback_data' => 'setmodel_gpt-5'],
+            ['text' => '✨ gpt-5-mini',   'callback_data' => 'setmodel_gpt-5-mini'],
+        ],
+        [
+            ['text' => '📦 gpt-5-nano',   'callback_data' => 'setmodel_gpt-5-nano'],
+        ],
+    ];
 
-        sendButtons($chatId, "Choose your model: \n  only pro users", $buttons);
-        return true;
-    }
+    sendButtons($chatId, "Choose your model: (Only PRO users can switch models)", $buttons);
+    return true;
+}
 
 
 // ----- /getpro -----

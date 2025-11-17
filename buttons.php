@@ -36,8 +36,9 @@ function handleCallback($update) {
     $callback = $update['callback_query'];
     $chatId   = $callback['message']['chat']['id'];
     $data     = $callback['data']; // the value of the pressed button
+    $model = str_replace('setmodel_', '', $data);
 
-    sendTelegramMessage($chatId, "✅ Your model has been updated to ");
+    sendTelegramMessage($chatId, "✅ Your model has been updated to ".$model);
     // Example: model selection
     if (str_starts_with($data, 'setmodel_')) {
         $model = substr($data, strlen('setmodel_'));
@@ -49,7 +50,6 @@ function handleCallback($update) {
         $stmt->execute([$model, $chatId]);
 
         answerCallback($callback['id'], "Model set to: $model ✔");
-
 
         return true;
     }

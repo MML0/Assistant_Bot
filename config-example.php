@@ -12,6 +12,7 @@ return [
     ],
     'telegram' => [
         'bot_token' => 'YOUR_TELEGRAM_BOT_TOKEN',
+        'bot_username' => 'my_bot',
     ],
     'gpt' => [
         'api_key' => 'YOUR_METIS_API_KEY',

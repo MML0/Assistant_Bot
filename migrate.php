@@ -34,7 +34,7 @@ try {
         first_name VARCHAR(255),
         last_name VARCHAR(255),
         is_pro TINYINT(1) DEFAULT 0,
-        pro_expire DATE DEFAULT NULL,
+        pro_expire DATETIME DEFAULT NULL,
         model VARCHAR(50) NOT NULL DEFAULT 'gpt-4.1-mini',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
