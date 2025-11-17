@@ -234,6 +234,7 @@ if (!$user) {
     // Pro expiration check
     if ($isPro && $proExpire && strtotime($proExpire) < time()) {
         $isPro = 0; // pro expired
+        $userModel = 'gpt-4.1-mini'; // default model
     }
 }
 

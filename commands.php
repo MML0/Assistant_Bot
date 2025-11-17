@@ -115,9 +115,8 @@ if ($lower === '/getpro') {
         "💎 *PRO Benefits*\n".
         "• Unlimited messages\n".
         "• Long-term memory\n".
-        "• Models: 4.1, 4o, 5, 5.1\n".
-        "• Faster responses\n\n".
-        "✨ Share this personal invite link with your friends. For each friend who starts the bot with it, you get *7 days of PRO*:\n".
+        "• Models: 4.1, 4o, 5, 5.1\n\n".
+        "✨ Share this personal invite link with your friends. For each friend who starts the bot with it, you get 3 days of PRO:\n\n".
         $refLink
     );
     return true;
