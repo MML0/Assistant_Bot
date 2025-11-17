@@ -36,14 +36,14 @@ if (str_starts_with($lower, '/start')) {
         if ($refUser) {
 
             $refUserId = $refUser['id'];
-            $expireAt = (new DateTime('+7 days'))->format('Y-m-d H:i:s');
+            $expireAt = (new DateTime('+3 days'))->format('Y-m-d H:i:s');
 
             makeUserPro($refUserId, null, $expireAt);
 
             // Tell referrer
             sendTelegramMessage(
                 $referrer,
-                "🎉 Someone joined using your link!\nYou earned *7 days of PRO*! 🚀"
+                "🎉 Someone joined using your link!\nYou earned 3 days of PRO! 🚀"
             );
         }
     }

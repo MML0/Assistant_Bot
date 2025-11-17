@@ -9,7 +9,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 
 // ----------------- CONFIG CONSTANTS -----------------
-const FREE_DAILY_LIMIT = 9;      // free user daily message limit
+const FREE_DAILY_LIMIT = 4;      // free user daily message limit
 const HISTORY_LIMIT    = 12;     // how many past messages to send to AI
 
 // ----------------- GPT FUNCTION -----------------
@@ -220,7 +220,7 @@ if (!$user) {
     // New user
     $stmt = $db->prepare("INSERT INTO users (chat_id, username, first_name, last_name) VALUES (?, ?, ?, ?)");
     $stmt->execute([$chatId, $username, $firstName, $lastName]);
-    $userModel = '4.1-mini'; // gpt-4.1-mini (default) or selected model
+    $userModel = 'gpt-4.1-mini'; // default model
 
     $userId    = $db->lastInsertId();
     $isPro     = 0;

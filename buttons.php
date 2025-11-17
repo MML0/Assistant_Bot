@@ -28,34 +28,48 @@ function sendButtons($chatId, $text, $buttons) {
 
 // Handle callback query
 function handleCallback($update) {
-
     if (!isset($update['callback_query'])) {
         return false;
     }
 
+    global $db;
+
     $callback = $update['callback_query'];
     $chatId   = $callback['message']['chat']['id'];
-    $data     = $callback['data']; // the value of the pressed button
-    $model = str_replace('setmodel_', '', $data);
+    $data     = $callback['data']; // e.g. "setmodel_gpt-4.1-mini"
 
-    sendTelegramMessage($chatId, "✅ Your model has been updated to ".$model);
-    // Example: model selection
+    // Only handle model buttons
     if (str_starts_with($data, 'setmodel_')) {
-        $model = substr($data, strlen('setmodel_'));
 
-        global $db;
+        // Check if user is PRO
+        $stmt = $db->prepare("SELECT is_pro FROM users WHERE chat_id = ?");
+        $stmt->execute([$chatId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        // Save into DB
+        if (!$row || !$row['is_pro']) {
+            // Not PRO → deny
+            answerCallback($callback['id'], "Model change is PRO only.");
+            sendTelegramMessage(
+                $chatId,
+                "🚫 Only PRO users can change the model.\nUse /getpro to upgrade."
+            );
+            return true;
+        }
+
+        // User is PRO → update model
+        $model = substr($data, strlen('setmodel_')); // remove "setmodel_"
+
         $stmt = $db->prepare("UPDATE users SET model = ? WHERE chat_id = ?");
         $stmt->execute([$model, $chatId]);
 
         answerCallback($callback['id'], "Model set to: $model ✔");
-
+        sendTelegramMessage($chatId, "✅ Your model has been updated to $model");
         return true;
     }
 
     return false; // no callback handled
 }
+
 
 
 // Respond to Telegram so the loading animation stops
