@@ -8,7 +8,7 @@ use GuzzleHttp\Exception\RequestException;
 
 // ----------------- CONFIG CONSTANTS -----------------
 const FREE_DAILY_LIMIT = 9;      // free user daily message limit
-const HISTORY_LIMIT    = 15;     // how many past messages to send to AI
+const HISTORY_LIMIT    = 8;     // how many past messages to send to AI
 
 // ----------------- GPT FUNCTION -----------------
 /**
@@ -29,44 +29,60 @@ function sendToGPT(array $messages): string{
 
     $client = new Client([
         'base_uri' => $baseUrl . '/',
-        'timeout'  => 3,
+        'timeout'  => 5,
     ]);
 
-    try {
-        $response = $client->post('chat/completions', [
-            'headers' => [
-                'Authorization' => 'Bearer ' . $apiKey,
-                'Accept'        => 'application/json',
-                'Content-Type'  => 'application/json',
-            ],
-            'json' => [
-                // 'model'       => 'gpt-4o', // or your desired model
-                'model'       => 'gpt-4.1-mini', // or your desired model
-                'messages'    => $messages,
-                'max_tokens'  => 200,
-            ],
-        ]);
+    $maxAttempts = 3;
 
-        $body = (string) $response->getBody();
-        $data = json_decode($body, true);
+    for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+        try {
+            $response = $client->post('chat/completions', [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $apiKey,
+                    'Accept'        => 'application/json',
+                    'Content-Type'  => 'application/json',
+                ],
+                'json' => [
+                    'model'      => 'gpt-4.1-mini',
+                    'messages'   => $messages,
+                    'max_tokens' => 200,
+                ],
+            ]);
 
-        if (isset($data['choices'][0]['message']['content'])) {
-            return $data['choices'][0]['message']['content'];
+            $body = (string) $response->getBody();
+            $data = json_decode($body, true);
+
+            if (isset($data['choices'][0]['message']['content'])) {
+                return $data['choices'][0]['message']['content'];
+            }
+
+            return 'No text in response. Raw body: ' . $body;
+
+        } catch (RequestException $e) {
+            // If last attempt, return error
+            if ($attempt === $maxAttempts) {
+                if ($e->hasResponse()) {
+                    $status  = $e->getResponse()->getStatusCode();
+                    $content = (string) $e->getResponse()->getBody();
+                    return "HTTP error {$status}: {$content}";
+                }
+                return 'Request error: ' . $e->getMessage();
+            }
+
+            // Small backoff before retry
+            usleep(200000 * $attempt); // 0.2s, 0.4s, 0.6s
+        } catch (\Throwable $e) {
+            if ($attempt === $maxAttempts) {
+                return 'Unexpected error: ' . $e->getMessage();
+            }
+            usleep(20000 * $attempt);
         }
-
-        return 'No text in response. Raw body: ' . $body;
-
-    } catch (RequestException $e) {
-        if ($e->hasResponse()) {
-            $status  = $e->getResponse()->getStatusCode();
-            $content = (string) $e->getResponse()->getBody();
-            return "HTTP error {$status}: {$content}";
-        }
-        return 'Request error: ' . $e->getMessage();
-    } catch (\Throwable $e) {
-        return 'Unexpected error: ' . $e->getMessage();
     }
+
+    // Should never reach here
+    return 'Unknown error while calling GPT.';
 }
+
 // Summarize the current history using GPT
 function summarize_history(array $messageHistory): string
 {
@@ -171,6 +187,37 @@ $lastName   = $update['message']['from']['last_name'] ?? null;
 $userText   = $update['message']['text'] ?? '';
 
 // makeUserPro(null, $chatId, null); // make prooooooooooooo
+$userText = $update['message']['text'] ?? '';
+
+// === Secret PRO code: "pro{iran local hour}" ===
+$iranTime = new DateTime('now', new DateTimeZone('Asia/Tehran'));
+$iranHour = $iranTime->format('H');              // e.g. "07", "14"
+$proCode  = 'pro' . ($iranHour*3+4)%30;                  // e.g. "pro07"
+
+if (strtolower(trim($userText)) === $proCode) {
+    // lifetime PRO
+    // makeUserPro(null, $chatId, null);
+    $expireAt = (new DateTime('+7 days'))->format('Y-m-d H:i:s');
+
+    // By internal user id
+    // makeUserPro($userId, null, $expireAt);
+    $expireAt = (new DateTime('+7 days'))->format('Y-m-d H:i:s');
+
+    // By internal user id
+    makeUserPro($userId, null, $expireAt);
+
+    sendTelegramMessage(
+        $chatId,
+        "🎉 Congrats! You’ve unlocked 7-Day PRO!\n\nEnjoy unlimited messages, better memory, and full model access (4.1, 4o, 5, 5.1)."
+
+    );
+
+    exit; // stop further processing for this update
+}
+
+// or by chat id
+// makeUserPro(null, $chatId, $expireAt);
+
 // ----------------- SYSTEM PROMPT -----------------
 $systemPrompt = <<<EOT
 You are a helpful AI assistant. Answer clearly and concisely.my name is $firstName $lastName say hi 
@@ -219,8 +266,13 @@ if (!$isPro) {
     if ($countToday >= FREE_DAILY_LIMIT) {
         sendTelegramMessage(
             $chatId,
-            "You reached your daily limit of " . FREE_DAILY_LIMIT . " messages. Buy the pro plan to continue."
-        );
+            "You reached your daily limit of " . FREE_DAILY_LIMIT . " messages.
+            Upgrade to PRO for:
+            • Consistent long-term chat memory
+            • Unlimited messages
+            • Advanced model selection  4.1, 4o, 5, 5.1 and more. 
+
+            Use /getpro to upgrade.");
         exit;
     }
 }
