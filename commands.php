@@ -1,7 +1,10 @@
 <?php
 
 function handleCommand($chatId, $userText) {
-    global $db, $user, $config; 
+    global $db, $user, $config ;
+
+    $adminChatId = $config['telegram']['admin_chatid'];
+ 
     $lower = strtolower(trim($userText));
 
 // ----- /start -----
@@ -77,28 +80,52 @@ if (str_starts_with($lower, '/start')) {
 // ----- /setmodel -----
 if ($lower === '/setmodel') {
 
-    $buttons = [
-        [
-            ['text' => '🌐 gpt-4',        'callback_data' => 'setmodel_gpt-4'],
-            ['text' => '🤖 gpt-4o',       'callback_data' => 'setmodel_gpt-4o'],
-        ],
-        [
-            ['text' => '⚡ gpt-4o-mini',  'callback_data' => 'setmodel_gpt-4o-mini'],
-            ['text' => '🚀 gpt-4.1',      'callback_data' => 'setmodel_gpt-4.1'],
-        ],
-        [
-            ['text' => '⚡ gpt-4.1-mini', 'callback_data' => 'setmodel_gpt-4.1-mini'],
-            ['text' => '🧩 gpt-4.1-nano', 'callback_data' => 'setmodel_gpt-4.1-nano'],
-        ],
-        [
-            ['text' => '🛸 gpt-5',        'callback_data' => 'setmodel_gpt-5'],
-            ['text' => '✨ gpt-5-mini',   'callback_data' => 'setmodel_gpt-5-mini'],
-        ],
-        [
-            ['text' => '📦 gpt-5-nano',   'callback_data' => 'setmodel_gpt-5-nano'],
-        ],
-    ];
-
+    if( $chatId === $adminChatId){
+        $buttons = [
+            [
+                ['text' => '🌐 gpt-4',        'callback_data' => 'setmodel_gpt-4'],
+                ['text' => '🤖 gpt-4o',       'callback_data' => 'setmodel_gpt-4o'],
+            ],
+            [
+                ['text' => '⚡ gpt-4o-mini',  'callback_data' => 'setmodel_gpt-4o-mini'],
+                ['text' => '🚀 gpt-4.1',      'callback_data' => 'setmodel_gpt-4.1'],
+            ],
+            [
+                ['text' => '⚡ gpt-4.1-mini', 'callback_data' => 'setmodel_gpt-4.1-mini'],
+                ['text' => '🧩 gpt-4.1-nano', 'callback_data' => 'setmodel_gpt-4.1-nano'],
+            ],
+            [
+                ['text' => '🛸 gpt-5',        'callback_data' => 'setmodel_gpt-5'],
+                ['text' => '✨ gpt-5-mini',   'callback_data' => 'setmodel_gpt-5-mini'],
+            ],
+            [
+                ['text' => '📦 gpt-5-nano',   'callback_data' => 'setmodel_gpt-5-nano'],
+            ],
+        ];
+        
+    }else{
+        $buttons = [
+            [
+                ['text' => '🌐 gpt-4',        'callback_data' => 'setmodel_gpt-4'],
+                ['text' => '🤖 gpt-4o',       'callback_data' => 'setmodel_gpt-4o'],
+            ],
+            [
+                ['text' => '⚡ gpt-4o-mini',  'callback_data' => 'setmodel_gpt-4o-mini'],
+                ['text' => '🚀 gpt-4.1',      'callback_data' => 'setmodel_gpt-4.1'],
+            ],
+            [
+                ['text' => '⚡ gpt-4.1-mini', 'callback_data' => 'setmodel_gpt-4.1-mini'],
+                ['text' => '🧩 gpt-4.1-nano', 'callback_data' => 'setmodel_gpt-4.1-nano'],
+            ],
+            [
+                ['text' => '🛸 gpt-5',        'callback_data' => 'setmodel_gpt-4o'],
+                ['text' => '✨ gpt-5-mini',   'callback_data' => 'setmodel_gpt-5-mini'],
+            ],
+            [
+                ['text' => '📦 gpt-5-nano',   'callback_data' => 'setmodel_gpt-5-nano'],
+            ],
+        ];
+    }
     sendButtons($chatId, "Choose your model: (Only PRO users can switch models)", $buttons);
     return true;
 }
