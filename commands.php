@@ -80,7 +80,7 @@ if (str_starts_with($lower, '/start')) {
 // ----- /setmodel -----
 if ($lower === '/setmodel') {
 
-    if( $chatId === $adminChatId){
+    if( $chatId == $adminChatId){
         $buttons = [
             [
                 ['text' => '🌐 gpt-4',        'callback_data' => 'setmodel_gpt-4'],

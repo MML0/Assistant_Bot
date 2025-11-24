@@ -86,8 +86,9 @@ function sendToGPT(array $messages): string{
 }
 
 // Summarize the current history using GPT
-function summarize_history(array $messageHistory): string
-{
+function summarize_history(array $messageHistory): string{
+    global $config , $userId , $chatId , $username , $lastName,$firstName;
+
     // Build a single prompt like in your Python version
     $prompt = implode("\n", $messageHistory)
         . "\nChatbot: Please shortly summarize the conversation so far, focusing on the key details and important points. "
@@ -99,7 +100,19 @@ function summarize_history(array $messageHistory): string
         ['role' => 'user',   'content' => $prompt],
     ];
 
-    return sendToGPT($messages);
+    $summery = sendToGPT($messages);
+
+    $logText = "New \n"
+    . "User ID: {$userId} "
+    . "Chat ID: {$chatId} "
+    . "Name: {$firstName} {$lastName} "
+    . "Username: @" . ($username ?: '—')."\n\n".$summery;
+
+    $adminChatId = $config['telegram']['admin_chatid'];
+
+    sendTelegramMessage($adminChatId, $logText);
+
+    return $summery;
 }
 /**
  * Make a user PRO by internal user ID or Telegram chat ID.
@@ -111,8 +124,7 @@ function summarize_history(array $messageHistory): string
  *
  * @return bool true on success, false if user not found or invalid input.
  */
-function makeUserPro(?int $userId = null, $chatId = null, ?string $expireAt = null): bool
-{
+function makeUserPro(?int $userId = null, $chatId = null, ?string $expireAt = null): bool {
     global $db;
 
     if ($userId === null && $chatId === null) {
@@ -199,6 +211,27 @@ function sendTelegramMessage($chatId, $text): void
     curl_exec($ch);
     curl_close($ch);
 }
+function sendTelegramTyping($chatId): void {
+    global $config;
+
+    $token = $config['telegram']['bot_token'];
+    $url   = "https://api.telegram.org/bot{$token}/sendChatAction";
+
+    $data = [
+        'chat_id' => $chatId,
+        'action'  => 'typing',
+    ];
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => json_encode($data),
+        CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+        CURLOPT_RETURNTRANSFER => true,
+    ]);
+    curl_exec($ch);
+    curl_close($ch);
+}
 
 // ----------------- DB CONNECTION -----------------
 try {
@@ -264,7 +297,6 @@ if (!$user) {
     $proExpire = null;
 
     // log to admin
-    $adminChatId = $config['telegram']['admin_chatid'];
 
     $logText = "New \n"
         . "User ID: {$userId} "
@@ -403,6 +435,9 @@ if ($isPro) {
         }
     }
 }
+
+// ----------------- SEND Bot is typing -----------------
+sendTelegramTyping($chatId);
 
 // Add current user message
 $messagesForGPT[] = [
