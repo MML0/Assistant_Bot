@@ -1,7 +1,7 @@
 <?php
 
 function handleCommand($chatId, $userText) {
-    global $db, $user, $config ;
+    global $db, $user, $config, $userId;
 
     $adminChatId = $config['telegram']['admin_chatid'];
  
@@ -130,6 +130,16 @@ if ($lower === '/setmodel') {
     return true;
 }
 
+// ----- /newchat -----
+if ($lower === '/newchat') {
+    // Save summary marker in DB
+    $stmt = $db->prepare("INSERT INTO messages (user_id, message, type) VALUES (?, ?, 'SUMMARY')");
+    $userId    = $user['id'];
+    $stmt->execute([$userId, ""]);
+
+    sendTelegramMessage($chatId, "✅ Your chat history has been cleared. You can start fresh!");
+    return true;
+}
 
 // ----- /getpro -----
 if ($lower === '/getpro') {
