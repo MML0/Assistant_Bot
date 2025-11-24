@@ -5,7 +5,8 @@ function handleCommand($chatId, $userText) {
 
     $adminChatId = $config['telegram']['admin_chatid'];
  
-    $lower = strtolower(trim($userText));
+    $botUsername = $config['telegram']['bot_username']; 
+    $lower = strtolower(trim(str_replace("@$botUsername", "", $userText)));
 
 // ----- /start -----
 if (str_starts_with($lower, '/start')) {
