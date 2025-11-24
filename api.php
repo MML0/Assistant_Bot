@@ -264,7 +264,10 @@ $firstName  = $update['message']['from']['first_name'] ?? null;
 $lastName   = $update['message']['from']['last_name'] ?? null;
 $userText   = $update['message']['text'] ?? '';
 
+// Check if message is from group
+$isGroup = $update['message']['chat']['type'] === 'group' || $update['message']['chat']['type'] === 'supergroup';
 
+$adminChatId = $config['telegram']['admin_chatid'];
 
 
 // ----------------- SYSTEM PROMPT -----------------
@@ -276,10 +279,30 @@ if (!$userText) {
     exit;
 }
 
-// ----------------- USER HANDLING -----------------
-$stmt = $db->prepare("SELECT * FROM users WHERE chat_id = ?");
-$stmt->execute([$chatId]);
-$user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+if ($isGroup) {
+    $groupChatId = $update['message']['chat']['id']; // ❌ group chat ID (negative)
+    $chatId      = $update['message']['from']['id']; // ✅ real user ID
+
+    // ----------------- USER HANDLING -----------------
+    $stmt = $db->prepare("SELECT * FROM users WHERE chat_id = ?");
+    $stmt->execute([$chatId]);
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    $chatId = $groupChatId;
+
+} else {
+    // Private chat
+    $groupChatId = null;
+    $chatId      = $update['message']['chat']['id']; // ✅ same as user ID
+
+    // ----------------- USER HANDLING -----------------
+    $stmt = $db->prepare("SELECT * FROM users WHERE chat_id = ?");
+    $stmt->execute([$chatId]);
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+}
+
 
 // Check if message is a command
 if (handleCommand($chatId, $userText)) {
@@ -304,6 +327,7 @@ if (!$user) {
         . "Name: {$firstName} {$lastName} "
         . "Username: @" . ($username ?: '—');
     sendTelegramMessage($adminChatId, $logText);
+
 } else {
     $userId    = $user['id'];
     $isPro     = $user['is_pro'];
@@ -392,7 +416,8 @@ $messagesForGPT = [
 
 $flatHistory   = [];
 $foundSummary  = false;
-if ($isPro) {
+// add history to all users for now or not XD
+if ($isPro || 0) {
     foreach ($historyRows as $row) {
         // If we detect a summary row → reset and keep ONLY that summary as context
         if ($row['type'] === 'SUMMARY') {
