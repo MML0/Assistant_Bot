@@ -160,6 +160,5 @@ if ($lower === '/getpro') {
     return true;
 }
 
-
     return false; // no command matched
 }
