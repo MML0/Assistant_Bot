@@ -31,7 +31,7 @@ function sendToGPT(array $messages): string{
 
     $client = new Client([
         'base_uri' => $baseUrl . '/',
-        'timeout'  => 5,
+        'timeout'  => 3,
     ]);
 
     $maxAttempts = 3;
@@ -72,12 +72,12 @@ function sendToGPT(array $messages): string{
             }
 
             // Small backoff before retry
-            usleep(200000 * $attempt); // 0.2s, 0.4s, 0.6s
+            usleep(20000 * $attempt); // 0.2s, 0.4s, 0.6s
         } catch (\Throwable $e) {
             if ($attempt === $maxAttempts) {
-                return 'Unexpected error: ' . $e->getMessage();
+                // return 'Unexpected error: ' . $e->getMessage();
             }
-            usleep(20000 * $attempt);
+            usleep(2000 * $attempt);
         }
     }
 
@@ -381,12 +381,12 @@ if (!$isPro) {
     if ($countToday >= FREE_DAILY_LIMIT) {
         sendTelegramMessage(
             $chatId,
-            "You reached your daily limit of " . FREE_DAILY_LIMIT . " messages.
- Upgrade to PRO for:  
- • Consistent long-term chat memory 
- • Unlimited messages
- • Advanced model selection 4.1, 4o, 5 and ... 
-Use /getpro to upgrade.");
+            "You reached your daily limit of " . FREE_DAILY_LIMIT . " messages.\n"
+            ."Upgrade to PRO for:  \n"
+            ." • Consistent long-term chat memory \n"
+            ." • Unlimited messages\n"
+            ." • Advanced model selection 4.1, 4o, 5 and ... \n\n"
+            ."Use /getpro to upgrade.");
         exit;
     }
 }

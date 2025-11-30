@@ -66,17 +66,17 @@ if (str_starts_with($lower, '/start')) {
     return true;
 }
 
-    // ----- /help -----
-    if ($lower === '/help') {
-        sendTelegramMessage($chatId,
-            "📌 *Commands*\n\n".
-            "/start – Start the bot\n".
-            "/help – Info & usage\n".
-            "/setmodel – Choose AI model\n".
-            "/getpro – Unlock PRO features"
-        );
-        return true;
-    }
+// ----- /help -----
+if ($lower === '/help') {
+    sendTelegramMessage($chatId,
+        "📌 *Commands*\n\n".
+        "/start – Start the bot\n".
+        "/help – Info & usage\n".
+        "/setmodel – Choose AI model\n".
+        "/getpro – Unlock PRO features"
+    );
+    return true;
+}
 
 // ----- /setmodel -----
 if ($lower === '/setmodel') {
@@ -163,6 +163,5 @@ if ($lower === '/getpro') {
     );
     return true;
 }
-
     return false; // no command matched
 }
