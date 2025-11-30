@@ -20,14 +20,14 @@ Supports free & PRO users, persistent memory, auto-summary, model selection, adm
 
 ## 📁 Project Structure
 project/
--│
--├── api.php # Main bot logic
--├── commands.php # /commands handler
--├── buttons.php # Inline keyboards handler
--├── migration.php # Fresh DB migration tool
--├── config.php # Configuration (DB + API keys)
--├── vendor/ # Composer packages
--└── README.md # You're reading this!
+- │
+- ├── api.php # Main bot logic
+- ├── commands.php # /commands handler
+- ├── buttons.php # Inline keyboards handler
+- ├── migration.php # Fresh DB migration tool
+- ├── config.php # Configuration (DB + API keys)
+- ├── vendor/ # Composer packages
+- └── README.md # You're reading this!
 
 # 🚀 Installation
 
