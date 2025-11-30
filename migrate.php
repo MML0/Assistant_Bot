@@ -1,6 +1,17 @@
 <?php
 $config = require 'config.php';
 
+// Example: ask for admin password before running migration
+echo "Enter admin password: ";
+$handle = fopen("php://stdin", "r");
+$input = trim(fgets($handle));
+
+if ($input !== $config['admin']['password']) {
+    die("❌ Wrong admin password. Migration aborted.\n");
+}
+
+echo "✔ Admin authenticated.\n";
+
 try {
     $db = new PDO(
         "mysql:host={$config['database']['host']};dbname={$config['database']['dbname']}",

@@ -40,14 +40,14 @@ if (str_starts_with($lower, '/start')) {
         if ($refUser) {
 
             $refUserId = $refUser['id'];
-            $expireAt = (new DateTime('+3 days'))->format('Y-m-d H:i:s');
+            $expireAt = (new DateTime('+1 days'))->format('Y-m-d H:i:s');
 
             makeUserPro($refUserId, null, $expireAt);
 
             // Tell referrer
             sendTelegramMessage(
                 $referrer,
-                "🎉 Someone joined using your link!\nYou earned 3 days of PRO! 🚀"
+                "🎉 Someone joined using your link!\nYou earned 1 days of PRO! 🚀"
             );
         }
     }
@@ -144,10 +144,14 @@ if ($lower === '/newchat') {
 
 // ----- /getpro -----
 if ($lower === '/getpro') {
-    global $config;
-
+    global $config, $update;
+    if (strpos($chatId, '-') !== false) {
+        $user_chatId = $update['message']['from']['id']; // ✅ real user ID
+    }else{
+        $user_chatId= $update['message']['chat']['id'];
+    }
     $botUsername = $config['telegram']['bot_username']; // e.g. "MyCoolBot"
-    $refLink     = "https://t.me/{$botUsername}?start=ref" . $chatId;
+    $refLink     = "https://t.me/{$botUsername}?start=ref" . $user_chatId;
 
     sendTelegramMessage($chatId,
         "💎 *PRO Benefits*\n".

@@ -189,8 +189,7 @@ function makeUserPro(?int $userId = null, $chatId = null, ?string $expireAt = nu
 }
 
 // ----------------- TELEGRAM FUNCTION -----------------
-function sendTelegramMessage($chatId, $text): void
-{
+function sendTelegramMessage($chatId, $text): void{
     global $config;
 
     $token = $config['telegram']['bot_token'];
@@ -417,7 +416,7 @@ $messagesForGPT = [
 $flatHistory   = [];
 $foundSummary  = false;
 // add history to all users for now or not XD
-if ($isPro || 0) {
+if ($isPro || 1) {
     foreach ($historyRows as $row) {
         // If we detect a summary row → reset and keep ONLY that summary as context
         if ($row['type'] === 'SUMMARY') {
