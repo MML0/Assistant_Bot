@@ -37,16 +37,22 @@ git clone <your-repo-url>
 cd your-project
 ```
 ## 2. Install dependencies
+```sh
 composer install
+```
 
 ## 3. Edit config.php
 
 ## 5. Database Migration (Fresh)
-GET  https://yourhost.com/migration.php?pass=ADMIN_PASSWORD
-
+GET  
+```link
+https://yourhost.com/migration.php?pass=ADMIN_PASSWORD
+```
 ## 6. Webhook Setup
-GET https://api.telegram.org/bot<token>/setWebhook?url=https://yourhost.com/api.php
-
+GET 
+```link
+https://api.telegram.org/bot<token>/setWebhook?url=https://yourhost.com/api.php
+```
 
 ### 🧑‍💻 Contributing
 PRs welcome!
