@@ -29,6 +29,8 @@ project/
 - ├── vendor/ # Composer packages
 - └── README.md # You're reading this!
 
+---
+
 # 🚀 Installation
 
 ### 1. Clone the project
@@ -53,6 +55,7 @@ GET
 ```link
 https://api.telegram.org/bot<token>/setWebhook?url=https://yourhost.com/api.php
 ```
+---
 
 ### 🧑‍💻 Contributing
 PRs welcome!
@@ -63,6 +66,7 @@ You can contribute by:
 - make tarnslation like not hard coded replys
 - Enhancing memory, models, or UI buttons
 
+---
 
 ### 🐞 Bug Reports
 Create an issue with:
@@ -74,6 +78,8 @@ Create an issue with:
 - Hosting environment
 
 Or contact admin Telegram ID: @MML_0
+
+---
 
 ### 📄 License (MIT)
 MIT License
