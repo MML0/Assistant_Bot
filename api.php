@@ -23,24 +23,27 @@ const HISTORY_LIMIT    = 12;     // how many past messages to send to AI
  *          ['role' => 'assistant', 'content' => '...'],
  *        ]
  */
-function sendToGPT(array $messages): string{
+
+function sendToGPT(array $messages): string {
     global $config;
 
     $apiKey  = $config['gpt']['api_key'];
-    $baseUrl = rtrim($config['gpt']['base_url'], '/'); // e.g. https://api.metisai.ir/openai/v1
+    $baseUrl = rtrim($config['gpt']['base_url'], '/');
+    $adminChatId = $config['telegram']['admin_chatid'];
 
     $client = new Client([
         'base_uri' => $baseUrl . '/',
-        'timeout'  => 3,
+        'timeout'  => 5,  // give GPT more time
     ]);
 
     $maxAttempts = 3;
+    $errors = []; // store error logs for admin
 
     for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
         try {
             $response = $client->post('chat/completions', [
                 'headers' => [
-                    'Authorization' => 'Bearer ' . $apiKey,
+                    'Authorization' => "Bearer {$apiKey}",
                     'Accept'        => 'application/json',
                     'Content-Type'  => 'application/json',
                 ],
@@ -58,31 +61,36 @@ function sendToGPT(array $messages): string{
                 return $data['choices'][0]['message']['content'];
             }
 
-            return 'No text in response. Raw body: ' . $body;
+            // No content → treat it as an error but retry
+            $errors[] = "Attempt {$attempt}: No content. Body: {$body}";
 
         } catch (RequestException $e) {
-            // If last attempt, return error
-            if ($attempt === $maxAttempts) {
-                if ($e->hasResponse()) {
-                    $status  = $e->getResponse()->getStatusCode();
-                    $content = (string) $e->getResponse()->getBody();
-                    return "HTTP error {$status}: {$content}";
-                }
-                return 'Request error: ' . $e->getMessage();
+
+            $msg = "Attempt {$attempt}: RequestException → " . $e->getMessage();
+
+            if ($e->hasResponse()) {
+                $status  = $e->getResponse()->getStatusCode();
+                $content = (string) $e->getResponse()->getBody();
+                $msg .= "\nStatus: {$status}\nResponse: {$content}";
             }
 
-            // Small backoff before retry
-            usleep(20000 * $attempt); // 0.2s, 0.4s, 0.6s
+            $errors[] = $msg;
+
         } catch (\Throwable $e) {
-            if ($attempt === $maxAttempts) {
-                // return 'Unexpected error: ' . $e->getMessage();
-            }
-            usleep(2000 * $attempt);
+            // Any PHP/JSON/Network error
+            $errors[] = "Attempt {$attempt}: Throwable → " . $e->getMessage();
         }
+
+        // Wait before retry
+        usleep(500000 * $attempt); 
     }
 
-    // Should never reach here
-    return 'Unknown error while calling GPT.';
+    // ❗ If all attempts failed, send the errors to admin
+    $logText = "🚨 GPT Error Log:\n" . implode("\n\n", $errors);
+    sendTelegramMessage($adminChatId, $logText);
+
+    // Always return safe fallback to user
+    return "⚠️ GPT is temporarily unavailable. Please try again.";
 }
 
 // Summarize the current history using GPT
