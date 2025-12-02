@@ -10,7 +10,7 @@ use GuzzleHttp\Exception\RequestException;
 
 // ----------------- CONFIG CONSTANTS -----------------
 const FREE_DAILY_LIMIT = 4;      // free user daily message limit
-const HISTORY_LIMIT    = 12;     // how many past messages to send to AI
+const HISTORY_LIMIT    = 20;     // how many past messages to send to AI
 
 // ----------------- GPT FUNCTION -----------------
 /**
@@ -110,7 +110,7 @@ function summarize_history(array $messageHistory): string{
 
     $summery = sendToGPT($messages);
 
-    $logText = "New \n"
+    $logText = "New summary \n"
     . "User ID: {$userId} "
     . "Chat ID: {$chatId} "
     . "Name: {$firstName} {$lastName} "
@@ -279,7 +279,7 @@ $adminChatId = $config['telegram']['admin_chatid'];
 
 // ----------------- SYSTEM PROMPT -----------------
 $systemPrompt = <<<EOT
-You are a helpful AI assistant. Answer clearly and concisely.my name is $firstName $lastName say hi 
+You are a helpful AI assistant in telegram chat no wierd markup text. Answer clearly and concisely.my name is $firstName $lastName say hi 
 EOT;
 
 if (!$userText) {
@@ -405,7 +405,7 @@ $stmt = $db->prepare("
     FROM messages 
     WHERE user_id = ?
     ORDER BY id DESC 
-    LIMIT " . (HISTORY_LIMIT + 100)
+    LIMIT " . (HISTORY_LIMIT + 10)
 );
 $stmt->execute([$userId]);
 $historyRows = array_reverse($stmt->fetchAll(PDO::FETCH_ASSOC));
@@ -446,24 +446,23 @@ if ($isPro || 1) {
                 'role'    => 'assistant',
                 'content' => "Summary of our chat so far: " . $row['message'],
             ];
-            $flatHistory[] = $row['message'];
+            $flatHistory[] = "Summary of our chat so far: " . $row['message'];
 
             continue;
         }
-
         if ($row['type'] === 'USER') {
             $messagesForGPT[] = [
                 'role'    => 'user',
                 'content' => $row['message'],
             ];
-            $flatHistory[] = $row['message'];
+            $flatHistory[] = 'user' . $row['message'];
 
         } elseif ($row['type'] === 'AI') {
             $messagesForGPT[] = [
                 'role'    => 'assistant',
                 'content' => $row['message'],
             ];
-            $flatHistory[] = $row['message'];
+            $flatHistory[] = 'user' . $row['message'];
         }
     }
 }
@@ -508,6 +507,11 @@ if (count($flatHistory) > HISTORY_LIMIT) {
 }
 
 
+$totalWords = 0;
+foreach ($flatHistory as $msg) {
+    $totalWords += str_word_count($msg, 0, "آابپتثجچحخدذرزسشصضطظعغفقکگلمنوهی");
+}
+sendTelegramMessage($adminChatId, "{$firstName} {$lastName} @{$username} count: {$totalWords}");
 
 
 // ----------------- SEND TO GPT -----------------
