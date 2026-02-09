@@ -181,8 +181,8 @@ if ($lower === '/getpro') {
         "• Access to advanced models (4.1, 4o, 5 series)\n\n".
         "✨ *Invite & Earn PRO*\n".
         "Share your personal link. Each friend who joins gives you *3 days PRO*:\n\n".
-        "`{$refLink}`";
-
+        "`{$refLink}`\n\n".
+        "🛒 Want to buy PRO? Contact @mml\_0";
     sendTelegramMessage($chatId, $text, "Markdown");
 
     return true;
