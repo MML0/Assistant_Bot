@@ -10,7 +10,7 @@ use GuzzleHttp\Exception\RequestException;
 
 // ----------------- CONFIG CONSTANTS -----------------
 const FREE_DAILY_LIMIT = 4;      // free user daily message limit
-const HISTORY_LIMIT    = 25;     // how many past messages to send to AI
+const HISTORY_LIMIT    = 30;     // how many past messages to send to AI
 
 // ----------------- GPT FUNCTION -----------------
 /**
@@ -538,7 +538,7 @@ if (count($flatHistory) > HISTORY_LIMIT) {
         ],
         [
             'role'    => 'user',
-            'content' => "Continuing: " . $userText
+            'content' => "Continuing from last chat sumerry : " . $userText
         ],
     ];
 }

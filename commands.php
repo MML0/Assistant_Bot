@@ -167,23 +167,24 @@ if ($lower === '/newchat') {
 
 // ----- /getpro -----
 if ($lower === '/getpro') {
-    global $config, $update;
-    if (strpos($chatId, '-') !== false) {
-        $user_chatId = $update['message']['from']['id']; // ✅ real user ID
-    }else{
-        $user_chatId= $update['message']['chat']['id'];
-    }
-    $botUsername = $config['telegram']['bot_username']; // e.g. "MyCoolBot"
-    $refLink     = "https://t.me/{$botUsername}?start=ref" . $user_chatId;
+    global $config, $update ,$isGroup;
+    // Real user ID (works in both private & group)
+    $userChatId = $update['message']['from']['id'];
 
-    sendTelegramMessage($chatId,
+    $botUsername = $config['telegram']['bot_username']; // e.g. MyCoolBot
+    $refLink     = "https://t.me/{$botUsername}?start=ref{$userChatId}";
+
+    $text =
         "💎 *PRO Benefits*\n".
         "• Unlimited messages\n".
         "• Long-term memory\n".
-        "• Models: 4.1, 4o, 5, 5.1\n\n".
-        "✨ Share this personal invite link with your friends. For each friend who starts the bot with it, you get 3 days of PRO:\n\n".
-        $refLink
-    );
+        "• Access to advanced models (4.1, 4o, 5 series)\n\n".
+        "✨ *Invite & Earn PRO*\n".
+        "Share your personal link. Each friend who joins gives you *3 days PRO*:\n\n".
+        "`{$refLink}`";
+
+    sendTelegramMessage($chatId, $text, "Markdown");
+
     return true;
 }
     return false; // no command matched
