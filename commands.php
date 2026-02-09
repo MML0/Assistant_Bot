@@ -119,7 +119,7 @@ if ($lower === '/setmodel') {
                 ['text' => '🧩 gpt-4.1-nano', 'callback_data' => 'setmodel_gpt-4.1-nano'],
             ],
             [
-                ['text' => '🛸 gpt-5',        'callback_data' => 'setmodel_gpt-4o'],
+                ['text' => '🛸 gpt-5',        'callback_data' => 'setmodel_gpt-5'],
                 ['text' => '✨ gpt-5-mini',   'callback_data' => 'setmodel_gpt-5-mini'],
             ],
             [
@@ -127,7 +127,11 @@ if ($lower === '/setmodel') {
             ],
         ];
     }
-    sendButtons($chatId, "Choose your model: (Only PRO users can switch models)", $buttons);
+    $stmt = $db->prepare("SELECT model FROM users WHERE chat_id = ?");
+    $stmt->execute([$chatId]);
+    $userModel = $stmt->fetchColumn();
+    $text = "🤖 *Your current model:* `$userModel`\n\nChoose your model:\n\n(Only PRO users can switch models)";
+    sendButtons($chatId, $text, $buttons, "Markdown");
     return true;
 }
 

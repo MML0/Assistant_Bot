@@ -10,7 +10,7 @@ use GuzzleHttp\Exception\RequestException;
 
 // ----------------- CONFIG CONSTANTS -----------------
 const FREE_DAILY_LIMIT = 4;      // free user daily message limit
-const HISTORY_LIMIT    = 20;     // how many past messages to send to AI
+const HISTORY_LIMIT    = 25;     // how many past messages to send to AI
 
 // ----------------- GPT FUNCTION -----------------
 /**
@@ -288,26 +288,38 @@ if (!$userText) {
 
 
 if ($isGroup) {
+    // Who owns this conversation memory?
+    $memoryOwnerId = $update['message']['chat']['id'];   // group id (shared memory)
+    $senderId      = $update['message']['from']['id'];   // real user
+    
     $groupChatId = $update['message']['chat']['id']; // ❌ group chat ID (negative)
     $chatId      = $update['message']['from']['id']; // ✅ real user ID
 
     // ----------------- USER HANDLING -----------------
     $stmt = $db->prepare("SELECT * FROM users WHERE chat_id = ?");
-    $stmt->execute([$chatId]);
+    $stmt->execute([$senderId]);
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
     $chatId = $groupChatId;
 
+    // Add name label for group messages
+    $displayName = trim($firstName . ' ' . $lastName);
+    if (!$displayName) $displayName = '@' . $username;
+    $userText = "{$displayName}: " . $userText;
+
 } else {
+    // Who owns this conversation memory?
+    $memoryOwnerId = $update['message']['from']['id'];   // private = user id
+    $senderId      = $memoryOwnerId;
+
     // Private chat
     $groupChatId = null;
     $chatId      = $update['message']['chat']['id']; // ✅ same as user ID
 
     // ----------------- USER HANDLING -----------------
     $stmt = $db->prepare("SELECT * FROM users WHERE chat_id = ?");
-    $stmt->execute([$chatId]);
+    $stmt->execute([$senderId]);
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
 }
 
 
@@ -319,7 +331,7 @@ if (handleCommand($chatId, $userText)) {
 if (!$user) {
     // New user
     $stmt = $db->prepare("INSERT INTO users (chat_id, username, first_name, last_name) VALUES (?, ?, ?, ?)");
-    $stmt->execute([$chatId, $username, $firstName, $lastName]);
+    $stmt->execute([$senderId, $username, $firstName, $lastName]);
     $userModel = 'gpt-4.1-mini'; // default model
 
     $userId    = $db->lastInsertId();
@@ -403,7 +415,7 @@ if (!$isPro) {
 $stmt = $db->prepare("
     SELECT type, message 
     FROM messages 
-    WHERE user_id = ?
+    WHERE chat_memory_id  = ?
     ORDER BY id DESC 
     LIMIT " . (HISTORY_LIMIT + 10)
 );
@@ -486,8 +498,8 @@ if (count($flatHistory) > HISTORY_LIMIT) {
     $summary = summarize_history($flatHistory);
 
     // Save summary marker in DB
-    $stmt = $db->prepare("INSERT INTO messages (user_id, message, type) VALUES (?, ?, 'SUMMARY')");
-    $stmt->execute([$userId, $summary]);
+    $stmt = $db->prepare("INSERT INTO messages (user_id, chat_memory_id, message, type) VALUES (?, ?, ?, 'SUMMARY')");
+    $stmt->execute([$userId, $memoryOwnerId, $summary]);
 
     // Reset GPT context using the new summary
     $messagesForGPT = [
@@ -518,11 +530,12 @@ sendTelegramMessage($adminChatId, "{$firstName} {$lastName} @{$username} count: 
 $gptReply = sendToGPT($messagesForGPT);
 
 // ----------------- SAVE MESSAGES -----------------
-$stmt = $db->prepare("INSERT INTO messages (user_id, message, type) VALUES (?, ?, 'USER')");
-$stmt->execute([$userId, $userText]);
+$stmt = $db->prepare("INSERT INTO messages (user_id, chat_memory_id, message, type) VALUES (?, ?, ?, 'USER')");
+$stmt->execute([$userId, $memoryOwnerId, $userText]);
 
-$stmt = $db->prepare("INSERT INTO messages (user_id, message, type) VALUES (?, ?, 'AI')");
-$stmt->execute([$userId, $gptReply]);
+$stmt = $db->prepare("INSERT INTO messages (user_id, chat_memory_id, message, type) VALUES (?, ?, ?, 'AI')");
+$stmt->execute([$userId, $memoryOwnerId, $gptReply]);
+
 
 // ----------------- SEND REPLY BACK TO TELEGRAM -----------------
 sendTelegramMessage($chatId, $gptReply);

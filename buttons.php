@@ -1,7 +1,7 @@
 <?php
 
 // Send inline keyboard (glass buttons)
-function sendButtons($chatId, $text, $buttons) {
+function sendButtons($chatId, $text, $buttons, $parseMode = null) {
     global $config;
 
     $token = $config['telegram']['bot_token'];
@@ -14,6 +14,11 @@ function sendButtons($chatId, $text, $buttons) {
             'inline_keyboard' => $buttons
         ])
     ];
+
+    // Only add parse_mode if provided
+    if ($parseMode) {
+        $payload['parse_mode'] = $parseMode;
+    }
 
     $ch = curl_init($url);
     curl_setopt_array($ch, [
