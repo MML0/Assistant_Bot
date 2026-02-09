@@ -415,11 +415,11 @@ if (!$isPro) {
 $stmt = $db->prepare("
     SELECT type, message 
     FROM messages 
-    WHERE chat_memory_id  = ?
+    WHERE chat_memory_id = ?
     ORDER BY id DESC 
     LIMIT " . (HISTORY_LIMIT + 10)
 );
-$stmt->execute([$userId]);
+$stmt->execute([$memoryOwnerId]);
 $historyRows = array_reverse($stmt->fetchAll(PDO::FETCH_ASSOC));
 
 

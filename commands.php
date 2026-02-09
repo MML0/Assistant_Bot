@@ -137,14 +137,33 @@ if ($lower === '/setmodel') {
 
 // ----- /newchat -----
 if ($lower === '/newchat') {
-    // Save summary marker in DB
-    $stmt = $db->prepare("INSERT INTO messages (user_id, message, type) VALUES (?, ?, 'SUMMARY')");
-    $userId    = $user['id'];
-    $stmt->execute([$userId, ""]);
+    global $isGroup, $update;
 
-    sendTelegramMessage($chatId, "✅ Your chat history has been cleared. You can start fresh!");
+    // Decide memory owner (same logic used earlier)
+    if ($isGroup) {
+        $memoryOwnerId = $update['message']['chat']['id'];   // group memory
+    } else {
+        $memoryOwnerId = $update['message']['from']['id'];   // private memory
+    }
+
+    $userId = $user['id'];
+
+    // Insert empty summary marker → wipes previous context
+    $stmt = $db->prepare("
+        INSERT INTO messages (user_id, chat_memory_id, message, type)
+        VALUES (?, ?, '', 'SUMMARY')
+    ");
+    $stmt->execute([$userId, $memoryOwnerId]);
+
+    if ($isGroup) {
+        sendTelegramMessage($chatId, "🧹 Group chat memory cleared. Starting fresh for everyone!");
+    } else {
+        sendTelegramMessage($chatId, "✅ Your chat history has been cleared. You can start fresh!");
+    }
+
     return true;
 }
+
 
 // ----- /getpro -----
 if ($lower === '/getpro') {
