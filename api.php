@@ -197,16 +197,41 @@ function makeUserPro(?int $userId = null, $chatId = null, ?string $expireAt = nu
 }
 
 // ----------------- TELEGRAM FUNCTION -----------------
-function sendTelegramMessage($chatId, $text): void{
+function sendTelegramMessage($chatId, $text, $parseMode = null): void {
     global $config;
 
     $token = $config['telegram']['bot_token'];
     $url   = "https://api.telegram.org/bot{$token}/sendMessage";
 
+    // ---------------- AUTO MARKDOWN DETECT ----------------
+    if ($parseMode === null) {
+        // Detect common Markdown patterns
+        $markdownPatterns = [
+            '/\*\*.*?\*\*/s',   // **bold**
+            '/__.*?__/s',       // __underline__
+            '/`{1,3}.*?`{1,3}/s', // `code` or ```block```
+            '/\[[^\]]+\]\([^)]+\)/', // [text](url)
+            '/~~.*?~~/s',       // ~~strike~~
+            '/\*[^*]+\*/',      // *italic*
+            '/_[^_]+_/',        // _italic_
+        ];
+
+        foreach ($markdownPatterns as $pattern) {
+            if (preg_match($pattern, $text)) {
+                $parseMode = "Markdown";
+                break;
+            }
+        }
+    }
+
     $data = [
         'chat_id' => $chatId,
         'text'    => $text,
     ];
+
+    if ($parseMode) {
+        $data['parse_mode'] = $parseMode;
+    }
 
     $ch = curl_init($url);
     curl_setopt_array($ch, [
