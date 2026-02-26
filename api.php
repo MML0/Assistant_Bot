@@ -9,7 +9,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 
 // ----------------- CONFIG CONSTANTS -----------------
-const FREE_DAILY_LIMIT = 4;      // free user daily message limit
+const FREE_DAILY_LIMIT = 10;      // free user daily message limit
 const HISTORY_LIMIT    = 30;     // how many past messages to send to AI
 
 // ----------------- GPT FUNCTION -----------------
