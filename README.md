@@ -108,14 +108,15 @@ Each tier has an ordered list of free OpenRouter models in `src/Settings.php`. Y
 ## Payments
 The flow is the same as before:
 
-`/buypro` → package button → Bale invoice → pre-checkout → `successful_payment` → `inquireTransaction`
+`/buypro` → package button → **sendInvoice** → user pays → **pre-checkout** → **successful_payment** → **inquireTransaction**
 
-Only when the status is `paid` does the bot:
-- add PRO time;
-- upgrade the tier;
-- turn on voice-to-text for the same number of days.
-
-Each payment is saved in `v2_payments`, so you can check any payment there.
+- **Invoice:** sent as JSON with the prices as a real list. If Bale refuses it (for example because the wallet token is wrong or missing), the user gets an error message and the admin sees Bale's exact reason. The user is no longer told "invoice sent" when it wasn't.
+- **Accepting the payment (pre-checkout):** Bale waits at most 10 seconds for the bot to answer `ok = true`. The bot answers right away with a real boolean `true`, and you get an alert if Bale rejects the answer. Invoices this bot didn't create are refused with a Persian reason.
+- **Confirming:** the bot asks `inquireTransaction` (with `transaction_id`) up to 4 times over about 6 seconds, because the transaction can still be "pending" when the payment message arrives. `paid` is accepted in any letter case.
+- **Only after confirmation** does the bot add PRO time, upgrade the tier and turn on voice-to-text for the same number of days.
+- **Never credited twice:** a payment Bale sends twice, or one you already credited by hand, is never credited again.
+- **Stuck payments:** if Bale reports a payment but never confirms it, the user gets the old "contact support" message. You get the details plus a ready command, `/grantpremium <id> <days> <receipt>`, to use after checking your wallet.
+- **Record:** every payment is saved in `v2_payments`.
 
 ## Voice-to-text
 - **Who:** only users with an active **paid** entitlement, checked on the server **before** anything is downloaded.

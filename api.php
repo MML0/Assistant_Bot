@@ -201,10 +201,25 @@ function makeUserPro(?int $userId = null, $chatId = null, ?string $expireAt = nu
 
 
 // ----------------- PAYMENTS -----------------
+function isPaidStatus($status): bool {
+    return is_string($status) && in_array(strtolower($status), ['paid', 'succeeded', 'success', 'successful', 'completed'], true);
+}
+
+function isFailedStatus($status): bool {
+    return is_string($status) && in_array(strtolower($status), ['failed', 'failure', 'canceled', 'cancelled', 'rejected', 'refunded', 'expired'], true);
+}
+
+// Already credited automatically, or by the admin with /grantpremium using this receipt number.
 function paymentAlreadyCredited($chargeId): bool {
-    global $db;
+    global $db, $tablePrefix;
     $stmt = $db->prepare("SELECT 1 FROM " . T_PAYMENTS . " WHERE charge_id = ? AND status = 'paid' LIMIT 1");
     $stmt->execute([(string) $chargeId]);
+    if ($stmt->fetchColumn() !== false) {
+        return true;
+    }
+    // /grantpremium stores the receipt lower-cased (commands are matched in lower case)
+    $stmt = $db->prepare("SELECT 1 FROM {$tablePrefix}premium_entitlements WHERE payment_ref IN (?, ?) AND status = 'active' LIMIT 1");
+    $stmt->execute([(string) $chargeId, strtolower((string) $chargeId)]);
     return $stmt->fetchColumn() !== false;
 }
 
@@ -274,6 +289,46 @@ function getProTimeRemainingStr($chatId = null): string {
 function telegramApiBase(): string {
     global $config;
     return rtrim($config['telegram']['api_base'] ?? 'https://tapi.bale.ai', '/');
+}
+
+/**
+ * Calls a Bale Bot API method and returns the decoded answer (['ok' => false, ...] on failure).
+ * Sends JSON first (real true/false and arrays). Only if Bale explicitly rejects that, the same
+ * call is repeated once in the form encoding the old code used; never after a network error,
+ * so an invoice cannot be sent twice.
+ */
+function baleCall(string $method, array $params, int $timeout = 8): array {
+    global $config;
+    $url = telegramApiBase() . "/bot{$config['telegram']['bot_token']}/{$method}";
+    $send = function ($body, array $headers) use ($url, $timeout) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $body,
+            CURLOPT_HTTPHEADER     => $headers,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_TIMEOUT        => $timeout,
+        ]);
+        $raw = curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($raw === false || $raw === '') {
+            return null; // network error: we do not know whether Bale processed it
+        }
+        $json = json_decode($raw, true);
+        return is_array($json) ? $json + ['_http' => $code] : ['ok' => false, '_http' => $code, 'description' => mb_substr($raw, 0, 200)];
+    };
+
+    $res = $send(json_encode($params, JSON_UNESCAPED_UNICODE), ['Content-Type: application/json']);
+    if (is_array($res) && empty($res['ok'])) {
+        $form = array_map(fn ($v) => is_array($v) ? json_encode($v, JSON_UNESCAPED_UNICODE) : (is_bool($v) ? ($v ? 'true' : 'false') : $v), $params);
+        $res2 = $send($form, []);
+        if (is_array($res2)) {
+            return $res2;
+        }
+    }
+    return $res ?? ['ok' => false, 'description' => 'network error'];
 }
 
 function sendTelegramMessage($chatId, $text, $parseMode = null): void {
@@ -382,12 +437,14 @@ try {
 }
 
 // ----------------- GET TELEGRAM UPDATE -----------------
-$update = json_decode(file_get_contents('php://input'), true);
+$rawUpdate = file_get_contents('php://input');
+$update = json_decode($rawUpdate, true);
 if (!is_array($update)) {
     exit;
 }
 // Bale re-delivers updates when the webhook is slow; never process (or credit) one twice.
-if (isset($update['update_id']) && !(new Bot\UpdateDeduper(botServices()->store))->firstSeen('u:' . $update['update_id'])) {
+// The key includes a hash of the body, so two different updates can never be mistaken for one.
+if (isset($update['update_id']) && !(new Bot\UpdateDeduper(botServices()->store))->firstSeen('u:' . $update['update_id'] . ':' . md5($rawUpdate))) {
     exit;
 }
 // Handle inline button presses
@@ -398,32 +455,24 @@ if (isset($update['callback_query'])) {
 }
 
 // Handle pre_checkout_query (payment confirmation step)
+// Bale asks "may this payment go ahead?" and waits at most 10 seconds for ok = true.
 if (isset($update['pre_checkout_query'])) {
     global $db, $config, $adminChatId;
-    
-    // sendTelegramMessage($adminChatId, "pre");
+
     $preCheckout = $update['pre_checkout_query'];
     $preCheckoutId = $preCheckout['id'];
-    $from = $preCheckout['from'];
-    $userId = $from['id'];
-    $payload = $preCheckout['invoice_payload'];
+    $payload = $preCheckout['invoice_payload'] ?? null;
 
-    // Accept all payments for now (add checks if needed)
-    $token = $config['telegram']['bot_token'];
-    $url = telegramApiBase() . "/bot{$token}/answerPreCheckoutQuery";
-    $data = [
-        'pre_checkout_query_id' => $preCheckoutId,
-        'ok' => true
-    ];
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => $data,
-        CURLOPT_RETURNTRANSFER => true,
-    ]);
-    $result = curl_exec($ch);
-    curl_close($ch);
-    // sendTelegramMessage($adminChatId, "pre_checkout_query result: " . var_export($result, true));
+    // Accept every invoice this bot created (buypro_{package}_{userId}_{time}).
+    $okToPay = $payload === null || (bool) preg_match('/^buypro_(smart|economic|pro)_([0-9]+)_/', (string) $payload);
+    $answer = ['pre_checkout_query_id' => $preCheckoutId, 'ok' => $okToPay];
+    if (!$okToPay) {
+        $answer['error_message'] = 'این فاکتور معتبر نیست. لطفاً دوباره /buypro را بزنید.';
+    }
+    $result = baleCall('answerPreCheckoutQuery', $answer, 6);
+    if (empty($result['ok'])) {
+        sendTelegramMessage($adminChatId, "⚠️ answerPreCheckoutQuery ناموفق بود (پرداخت کاربر تایید نشد):\n" . Bot\Redactor::redact(json_encode($result, JSON_UNESCAPED_UNICODE), 300), '');
+    }
     exit;
 }
 // Handle successful payment
@@ -446,18 +495,9 @@ if (isset($update['message']['successful_payment'])) {
         $paidUserId = $m[2];
         // Only proceed if user matches
         if ($userId == $paidUserId) {
-            // Set PRO duration based on package
-            $durations = [
-                'smart' => '+44 days', // 30+14
-                'economic' => '+20 days',
-                'pro' => '+60 days',
-            ];
-            $expireDays = [
-                'smart' => 44,
-                'economic' => 20,
-                'pro' => 60,
-            ];
-            $expireAt = (new DateTime($durations[$package]))->format('Y-m-d H:i:s');
+            // Set PRO duration based on package (same values as before: 44 / 20 / 60 days)
+            $expireDays = array_map(fn ($p) => $p['days'], buyProPackages());
+            $expireAt = (new DateTime('+' . $expireDays[$package] . ' days'))->format('Y-m-d H:i:s');
             // Find user internal id
             $stmt = $db->prepare("SELECT id FROM " . T_USERS . " WHERE chat_id = ?");
             $stmt->execute([$userId]);
@@ -470,22 +510,23 @@ if (isset($update['message']['successful_payment'])) {
             }
             if ($row) {
                 // --- Check transaction status via inquireTransaction ---
-                $token = $config['telegram']['bot_token'];
-                $inquireUrl = telegramApiBase() . "/bot{$token}/inquireTransaction";
-                $inquireData = [
-                    'transaction_id' => $telegramPaymentChargeId
-                ];
-                $ch = curl_init($inquireUrl);
-                curl_setopt_array($ch, [
-                    CURLOPT_POST => true,
-                    CURLOPT_POSTFIELDS => $inquireData,
-                    CURLOPT_RETURNTRANSFER => true,
-                ]);
-                $inquireResult = curl_exec($ch);
-                curl_close($ch);
-                sendTelegramMessage($adminChatId, "inquireResult: " . var_export($inquireResult, true));
-                $txn = json_decode($inquireResult, true);
-                $status = $txn['result']['status'] ?? null;
+                // The transaction can still be settling when this message arrives, so ask a few times.
+                $status = null;
+                $txn = [];
+                for ($try = 1; $try <= 4; $try++) {
+                    $txn = baleCall('inquireTransaction', ['transaction_id' => (string) $telegramPaymentChargeId], 8);
+                    $status = $txn['result']['status'] ?? null;
+                    if (isPaidStatus($status) || isFailedStatus($status)) {
+                        break;
+                    }
+                    if ($try < 4) {
+                        sleep(2);
+                    }
+                }
+                sendTelegramMessage($adminChatId, "inquireResult: " . Bot\Redactor::redact(json_encode($txn, JSON_UNESCAPED_UNICODE), 500), '');
+                if (isPaidStatus($status)) {
+                    $status = 'paid';
+                }
                 recordPayment($userId, (int) $row['id'], $package, $totalAmount, $currency, $payload, $telegramPaymentChargeId, $providerPaymentChargeId, (string) $status, $expireDays[$package]);
                 if ($status === 'paid') {
                     makeUserPro($row['id'], null, $expireAt);
@@ -519,6 +560,14 @@ if (isset($update['message']['successful_payment'])) {
                     sendTelegramMessage($adminChatId, $adminMsg);
                 } else {
                     sendTelegramMessage($chatId, "❌ پرداخت تایید نشد یا هنوز کامل نشده است. اگر مبلغ کسر شده است، با پشتیبانی تماس بگیرید.\nوضعیت تراکنش: {$status}\n\n @suport_0");
+                    if (!isFailedStatus($status)) {
+                        // Bale reported a successful payment but the inquiry did not confirm it yet.
+                        sendTelegramMessage($adminChatId, "⚠️ پرداخت تایید نشد (وضعیت: " . ($status ?? 'نامشخص') . ")\n"
+                            . "ChatID: {$userId} | بسته: {$package} | مبلغ: " . number_format((int) $totalAmount) . " ریال\n"
+                            . "رسید: {$telegramPaymentChargeId}\n"
+                            . "اگر پرداخت در کیف پول شما ثبت شده، با این دستور فعال کنید:\n"
+                            . "/grantpremium {$userId} {$expireDays[$package]} {$telegramPaymentChargeId}", '');
+                    }
                 }
             }
         }

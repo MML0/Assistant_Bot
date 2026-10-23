@@ -31,6 +31,30 @@ function sendButtons($chatId, $text, $buttons, $parseMode = null) {
     curl_close($ch);
 }
 
+// PRO packages (one place for titles, prices in rial and days).
+function buyProPackages(): array {
+    return [
+        'smart' => [
+            'title' => 'بسته هوشمندانه ۴۴ روزه',
+            'description' => 'دسترسی ۴۴ روزه به امکانات PRO',
+            'amount' => 2380000,
+            'days' => 44, // 30 + 14
+        ],
+        'economic' => [
+            'title' => 'بسته اقتصادی',
+            'description' => 'دسترسی ۲۰ روزه به امکانات PRO',
+            'amount' => 1190000,
+            'days' => 20,
+        ],
+        'pro' => [
+            'title' => 'بسته حرفه‌ای',
+            'description' => 'دسترسی ۶۰ روزه به امکانات PRO',
+            'amount' => 3900000,
+            'days' => 60,
+        ],
+    ];
+}
+
 // Add handling for buypro buttons to acknowledge selection
 function handleBuyProCallback($callback) {
     global $config;
@@ -45,23 +69,7 @@ function handleBuyProCallback($callback) {
         answerCallback($callback['id'], "بسته انتخاب شد ✔");
 
         // Define package details
-        $packages = [
-            'smart' => [
-                'title' => 'بسته هوشمندانه ۴۴ روزه',
-                'description' => 'دسترسی ۴۴ روزه به امکانات PRO',
-                'amount' => 2380000,
-            ],
-            'economic' => [
-                'title' => 'بسته اقتصادی',
-                'description' => 'دسترسی ۲۰ روزه به امکانات PRO',
-                'amount' => 1190000,
-            ],
-            'pro' => [
-                'title' => 'بسته حرفه‌ای',
-                'description' => 'دسترسی ۶۰ روزه به امکانات PRO',
-                'amount' => 3900000,
-            ],
-        ];
+        $packages = buyProPackages();
 
         if (!isset($packages[$package])) {
             sendTelegramMessage($chatId, "❌ بسته انتخابی نامعتبر است.");
@@ -74,7 +82,7 @@ function handleBuyProCallback($callback) {
         $provider_token = $config['payment']['provider_token'] ?? '';
         if ($provider_token === '' || $provider_token === 'WALLET-CHANGE-ME') {
             sendTelegramMessage($chatId, "❌ پرداخت فعلاً در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید: @suport_0");
-            sendTelegramMessage($config['telegram']['admin_chatid'], "⚠️ payment.provider_token در config.php تنظیم نشده است.");
+            sendTelegramMessage($config['telegram']['admin_chatid'], "⚠️ پرداخت غیرفعال است: در config.php این خط را اضافه کنید:\n'payment' => ['provider_token' => 'WALLET-...'],", '');
             return true;
         }
         $prices = [
@@ -89,21 +97,16 @@ function handleBuyProCallback($callback) {
             'description' => $pkg['description'],
             'payload' => 'buypro_' . $package . '_' . $userId . '_' . time(),
             'provider_token' => $provider_token,
-            'prices' => json_encode($prices),
+            'prices' => $prices,
         ];
 
         // Send invoice via Bale API
-        $token = $config['telegram']['bot_token'];
-        $url = telegramApiBase() . "/bot{$token}/sendInvoice";
-
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => $payload,
-            CURLOPT_RETURNTRANSFER => true,
-        ]);
-        $result = curl_exec($ch);
-        curl_close($ch);
+        $result = baleCall('sendInvoice', $payload, 10);
+        if (empty($result['ok'])) {
+            sendTelegramMessage($chatId, "❌ ارسال فاکتور ناموفق بود. لطفاً کمی بعد دوباره تلاش کنید یا با پشتیبانی تماس بگیرید: @suport_0");
+            sendTelegramMessage($config['telegram']['admin_chatid'], "⚠️ sendInvoice ناموفق بود:\n" . Bot\Redactor::redact(json_encode($result, JSON_UNESCAPED_UNICODE), 300), '');
+            return true;
+        }
 
         // Optionally, inform user
         sendTelegramMessage($chatId, "🧾 فاکتور پرداخت برای بسته {$pkg['title']} ارسال شد. لطفاً پرداخت را تکمیل کنید.");
