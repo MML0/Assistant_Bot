@@ -130,7 +130,7 @@ final class Router
                     $this->log->record('attempt', $base + [
                         'attempt' => $attempts, 'tier' => 'free', 'model' => $c['model']['id'], 'reason' => $c['reason'],
                         'latency_ms' => $res['latency_ms'], 'error_class' => $err['class'], 'success' => false,
-                        'possibly_processed' => $err['possibly_processed'], 'detail' => $err['detail'],
+                        'possibly_processed' => $err['possibly_processed'], 'detail' => $err['detail'], 'status' => $err['status'],
                     ]);
 
                     if ($err['scope'] === 'account') {
@@ -184,6 +184,7 @@ final class Router
                 'tokens_out' => $a['tokens_out'] ?? null, 'cost_usd' => $a['cost'] ?? null, 'cost_source' => $a['cost_source'] ?? null,
                 'success' => $a['ok'], 'error_class' => $a['error']['class'] ?? null,
                 'possibly_processed' => $a['error']['possibly_processed'] ?? null, 'detail' => $a['error']['detail'] ?? null,
+                'status' => $a['error']['status'] ?? null,
             ]);
         });
 

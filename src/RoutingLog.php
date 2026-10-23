@@ -23,7 +23,7 @@ final class RoutingLog
         $now = ($this->now)();
         $allowed = ['request_id', 'purpose', 'task', 'mode', 'tier_name', 'attempt', 'tier', 'model', 'free', 'reason', 'latency_ms',
             'tokens_in', 'tokens_out', 'cost_usd', 'cost_source', 'error_class', 'fallback_reason', 'success',
-            'attempts', 'possibly_processed', 'total_ms', 'detail'];
+            'attempts', 'possibly_processed', 'total_ms', 'detail', 'status'];
         $rec = ['ts' => round($now, 3), 'type' => $type] + array_intersect_key($fields, array_flip($allowed));
         if (isset($rec['detail'])) {
             $rec['detail'] = Redactor::redact((string) $rec['detail'], 200);
@@ -79,6 +79,7 @@ final class RoutingLog
                 } else {
                     $c = $r['error_class'] ?? 'unknown';
                     $models[$m]['errors'][$c] = ($models[$m]['errors'][$c] ?? 0) + 1;
+                    $models[$m]['last'] = ['class' => $c, 'status' => $r['status'] ?? null, 'detail' => $r['detail'] ?? null, 'ts' => $r['ts'] ?? null];
                     if ($c === ErrorClassifier::ACCOUNT_DAILY) {
                         $quotaHits++;
                     }
@@ -96,6 +97,7 @@ final class RoutingLog
                 'success_rate' => $m['n'] ? round($m['ok'] / $m['n'], 3) : null,
                 'avg_latency_ms' => $m['ok'] ? (int) round($m['lat'] / $m['ok']) : null,
                 'errors'       => $m['errors'],
+                'last_error'   => $m['last'] ?? null,
                 'repeatedly_failing' => $m['n'] >= 3 && $m['ok'] / $m['n'] < 0.5,
             ];
         }
@@ -154,6 +156,18 @@ final class RoutingLog
             $lines[] = ($m['repeatedly_failing'] ? '⚠️ ' : '• ') . "{$id} [{$m['tier']}] {$m['attempts']}× ok "
                 . ($m['success_rate'] !== null ? round($m['success_rate'] * 100) . '%' : '-')
                 . ($m['avg_latency_ms'] !== null ? " {$m['avg_latency_ms']}ms" : '');
+            if ($m['errors']) {
+                // What the API actually answered, so a failure can be fixed without reading log files.
+                arsort($m['errors']);
+                $counts = implode(', ', array_map(fn ($c, $n) => "{$c} ×{$n}", array_keys($m['errors']), $m['errors']));
+                $last = $m['last_error'] ?? [];
+                $lines[] = "   ↳ errors: {$counts}";
+                if ($last) {
+                    $lines[] = '   ↳ last: ' . (!empty($last['status']) ? "HTTP {$last['status']} " : '')
+                        . ($last['detail'] !== null && $last['detail'] !== '' ? '«' . mb_substr((string) $last['detail'], 0, 160) . '»' : '')
+                        . (!empty($last['ts']) ? ' at ' . gmdate('H:i', (int) $last['ts']) . ' UTC' : '');
+                }
+            }
         }
         return implode("\n", $lines);
     }

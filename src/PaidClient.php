@@ -83,12 +83,12 @@ final class PaidClient
             }
             $last = $result;
 
-            if (!in_array($err['class'], [ErrorClassifier::PROVIDER, ErrorClassifier::RATE_LIMIT, ErrorClassifier::TIMEOUT, ErrorClassifier::NETWORK, ErrorClassifier::EMPTY, ErrorClassifier::UNKNOWN], true)) {
-                break; // auth, invalid request, context, refusal...: retrying cannot help
-            }
-            $wait = 0.5 * $attempt + mt_rand(0, 250) / 1000;
+            // Like the old bot: whatever the error, try once more. MetisAI forwards to a pool of
+            // upstream keys, and a request it refuses (400/401/403/429…) often succeeds on the
+            // next try. A Retry-After is honoured up to 5 seconds.
+            $wait = 0.3 * $attempt + mt_rand(0, 200) / 1000;
             if ($err['retry_at']) {
-                $wait = max($wait, $err['retry_at'] - ($this->now)());
+                $wait = max($wait, min(5.0, $err['retry_at'] - ($this->now)()));
             }
             if (($this->now)() + $wait + 2 > $deadline) {
                 break;

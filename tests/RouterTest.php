@@ -134,12 +134,25 @@ test('invalid credentials: free chain stops after one attempt and stays paused',
     T::eq(1, $rig->freeCalls(), 'free route paused, no new free requests');
 });
 
-test('paid auth failure is not retried', function () use ($three) {
-    $rig = new RouterRig($three, fn ($req) => str_contains((string) $req->getUri(), 'paid.example') ? orError(401, 'bad key') : orError(503, 'down'));
+test('paid errors are tried once more, like the old bot (MetisAI often serves the next try)', function () use ($three) {
+    $paid = 0;
+    $rig = new RouterRig($three, function ($req) use (&$paid) {
+        if (!str_contains((string) $req->getUri(), 'paid.example')) {
+            return orError(503, 'down');
+        }
+        return ++$paid === 1 ? orError(403, 'upstream key rejected') : json(200, ['choices' => [['message' => ['content' => 'paid ok']]]]);
+    });
     $r = $rig->router->complete(convo());
+    T::ok($r['ok'] && $r['content'] === 'paid ok', 'second try answers');
+    T::eq(2, $rig->paidCalls());
+
+    $bad = new RouterRig($three, fn ($req) => str_contains((string) $req->getUri(), 'paid.example') ? orError(401, 'bad key') : orError(503, 'down'));
+    $r = $bad->router->complete(convo());
     T::ok(!$r['ok']);
-    T::eq(1, $rig->paidCalls(), 'one paid attempt only');
+    T::eq(2, $bad->paidCalls(), 'a real auth problem: two tries, no more');
     T::eq(msg('unavailable'), $r['user_message'], 'no internal error shown to user');
+    $stats = Bot\RoutingLog::format($bad->log->summary(1, $bad->health->snapshot(), $bad->budget->status(), $bad->catalog->state()));
+    T::ok(str_contains($stats, 'auth ×2') && str_contains($stats, 'HTTP 401') && str_contains($stats, 'bad key'), '/routingstats shows what the API answered');
 });
 
 test('invalid model id is skipped and not retried', function () use ($three) {
