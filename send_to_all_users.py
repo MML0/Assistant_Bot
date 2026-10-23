@@ -1,10 +1,11 @@
+import os
 import requests
 import time
 import re
 
 # Configuration
 BASE_URL = 'http://iran.mml-dev.ir/gpt_bot'  # Change to your actual base URL where PHP scripts are hosted
-ADMIN_PASS = 'CHANGE_ME'  # Change to your actual admin password
+ADMIN_PASS = os.environ.get('BOT_ADMIN_PASS', '')  # set BOT_ADMIN_PASS in your shell; never write it here
 
 # Endpoints
 GET_USERS_ENDPOINT = f'{BASE_URL}/get_users.php'

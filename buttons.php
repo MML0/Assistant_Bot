@@ -6,7 +6,7 @@ function sendButtons($chatId, $text, $buttons, $parseMode = null) {
 
     $token = $config['telegram']['bot_token'];
     // $url   = "https://api.telegram.org/bot{$token}/sendMessage";
-    $url   = "https://tapi.bale.ai/bot{$token}/sendMessage";
+    $url   = telegramApiBase() . "/bot{$token}/sendMessage";
 
     $payload = [
         'chat_id' => $chatId,
@@ -42,7 +42,7 @@ function handleBuyProCallback($callback) {
         $package = substr($data, strlen('buypro_'));
 
         // Acknowledge the button press
-        answerCallback($callback['id'], "You selected the $package package.");
+        answerCallback($callback['id'], "بسته انتخاب شد ✔");
 
         // Define package details
         $packages = [
@@ -70,9 +70,13 @@ function handleBuyProCallback($callback) {
 
         $pkg = $packages[$package];
 
-        // Prepare invoice data
-        // $provider_token = 'WALLET-TEST-1111111111111111'; // Replace with real token in production
-        $provider_token = 'WALLET-CHANGE-ME'; // Replace with real token in production
+        // Prepare invoice data (wallet token lives in config.php → 'payment' => ['provider_token' => ...])
+        $provider_token = $config['payment']['provider_token'] ?? '';
+        if ($provider_token === '' || $provider_token === 'WALLET-CHANGE-ME') {
+            sendTelegramMessage($chatId, "❌ پرداخت فعلاً در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید: @suport_0");
+            sendTelegramMessage($config['telegram']['admin_chatid'], "⚠️ payment.provider_token در config.php تنظیم نشده است.");
+            return true;
+        }
         $prices = [
             [
                 'label' => $pkg['title'],
@@ -90,7 +94,7 @@ function handleBuyProCallback($callback) {
 
         // Send invoice via Bale API
         $token = $config['telegram']['bot_token'];
-        $url = "https://tapi.bale.ai/bot{$token}/sendInvoice";
+        $url = telegramApiBase() . "/bot{$token}/sendInvoice";
 
         $ch = curl_init($url);
         curl_setopt_array($ch, [
@@ -126,7 +130,7 @@ function handleCallback($update) {
     if (str_starts_with($data, 'setmodel_')) {
 
         // Check if user is PRO and not expired
-        $stmt = $db->prepare("SELECT is_pro, pro_expire FROM users WHERE chat_id = ?");
+        $stmt = $db->prepare("SELECT is_pro, pro_expire FROM " . T_USERS . " WHERE chat_id = ?");
         $stmt->execute([$chatId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -145,14 +149,19 @@ function handleCallback($update) {
             return true;
         }
 
-        // User is PRO and not expired → update model
+        // User is PRO and not expired → update model tier (only known tiers are accepted)
         $model = substr($data, strlen('setmodel_')); // remove "setmodel_"
+        if (!isset(botServices()->settings['tiers'][$model])) {
+            answerCallback($callback['id'], "مدل نامعتبر است.");
+            return true;
+        }
 
-        $stmt = $db->prepare("UPDATE users SET model = ? WHERE chat_id = ?");
+        $stmt = $db->prepare("UPDATE " . T_USERS . " SET model = ? WHERE chat_id = ?");
         $stmt->execute([$model, $chatId]);
 
-        answerCallback($callback['id'], "مدل تنظیم شد به: $model ✔");
-        sendTelegramMessage($chatId, "✅ مدل شما به $model به‌روزرسانی شد");
+        $label = tierLabel($model);
+        answerCallback($callback['id'], "مدل تنظیم شد به: $label ✔");
+        sendTelegramMessage($chatId, "✅ مدل شما به $label به‌روزرسانی شد");
         return true;
     }
 
@@ -171,7 +180,7 @@ function answerCallback($callbackId, $text = "") {
 
     $token = $config['telegram']['bot_token'];
     // $url   = "https://api.telegram.org/bot{$token}/answerCallbackQuery";
-    $url   = "https://tapi.bale.ai/bot{$token}/answerCallbackQuery";
+    $url   = telegramApiBase() . "/bot{$token}/answerCallbackQuery";
 
     $payload = [
         'callback_query_id' => $callbackId,

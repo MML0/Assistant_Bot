@@ -2,7 +2,11 @@
 
 set_time_limit(0);
 
-$token = "CHANGE_ME_BOT_TOKEN";
+$config = require __DIR__ . '/config.php';
+$token = $config['ir_side']['bot_token'] ?? '';   // set in config.php (never in code)
+if ($token === '') {
+    exit;
+}
 $api = "https://tapi.bale.ai/bot$token/";
 
 // -------- TEMP FOLDER ----------

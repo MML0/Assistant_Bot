@@ -35,7 +35,7 @@ if (str_starts_with($lower, '/start')) {
     if (!$user && $referrer) {
 
         // Find referrer's DB record
-        $stmt = $db->prepare("SELECT id FROM users WHERE chat_id = ?");
+        $stmt = $db->prepare("SELECT id FROM " . T_USERS . " WHERE chat_id = ?");
         $stmt->execute([$referrer]);
         $refUser = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -77,7 +77,8 @@ if ($lower === '/help') {
         "/newchat –  پاک کردن حافظه چت 🧹\n" .
         "/setmodel –  انتخاب مدل هوش مصنوعی 🤖\n" .
         "/getpro –  دریافت *رایگان* امکانات PRO 🎁\n" .
-        "/buypro –  خرید امکانات PRO 💳\n\n$remain_pro"
+        "/buypro –  خرید امکانات PRO 💳\n" .
+        "🎤 ارسال پیام صوتی –  تبدیل صدا به متن (ویژه خریداران PRO)\n\n$remain_pro"
     );
     return true;
 }
@@ -85,64 +86,24 @@ if ($lower === '/help') {
 // ----- /setmodel -----
 if ($lower === '/setmodel') {
 
-    if( $chatId == $adminChatId){
-        $buttons = [
-            [
-                ['text' => '🌐 gpt-4',        'callback_data' => 'setmodel_gpt-4'],
-                ['text' => '🤖 gpt-4o',       'callback_data' => 'setmodel_gpt-4o'],
-            ],
-            [
-                ['text' => '⚡ gpt-4o-mini',  'callback_data' => 'setmodel_gpt-4o-mini'],
-                ['text' => '🚀 gpt-4.1',      'callback_data' => 'setmodel_gpt-4.1'],
-            ],
-            [
-                ['text' => '⚡ gpt-4.1-mini', 'callback_data' => 'setmodel_gpt-4.1-mini'],
-                ['text' => '🧩 gpt-4.1-nano', 'callback_data' => 'setmodel_gpt-4.1-nano'],
-            ],
-            [
-                ['text' => '🛸 gpt-5',        'callback_data' => 'setmodel_gpt-5'],
-                ['text' => '✨ gpt-5-mini',   'callback_data' => 'setmodel_gpt-5-mini'],
-            ],
-            [
-                ['text' => '📦 gpt-5-nano',   'callback_data' => 'setmodel_gpt-5-nano'],
-            ],
-        ];
-        
-    }else{
-        $buttons = [
-            [
-                ['text' => '🌐 gpt-4',        'callback_data' => 'setmodel_gpt-4'],
-                ['text' => '🤖 gpt-4o',       'callback_data' => 'setmodel_gpt-4o'],
-            ],
-            [
-                ['text' => '⚡ gpt-4o-mini',  'callback_data' => 'setmodel_gpt-4o-mini'],
-                ['text' => '🚀 gpt-4.1',      'callback_data' => 'setmodel_gpt-4.1'],
-            ],
-            [
-                ['text' => '⚡ gpt-4.1-mini', 'callback_data' => 'setmodel_gpt-4.1-mini'],
-                ['text' => '🧩 gpt-4.1-nano', 'callback_data' => 'setmodel_gpt-4.1-nano'],
-            ]
-        ];
-        // $buttons = [
-        //     [
-        //         ['text' => '🌐 gpt-4',        'callback_data' => 'setmodel_gpt-4.1-mini'],
-        //         ['text' => '🤖 gpt-4o',       'callback_data' => 'setmodel_gpt-4.1-mini'],
-        //     ],
-        //     [
-        //         ['text' => '⚡ gpt-4o-mini',  'callback_data' => 'setmodel_gpt-4o-mini'],
-        //         ['text' => '🚀 gpt-4.1',      'callback_data' => 'setmodel_gpt-4.1-mini'],
-        //     ],
-        //     [
-        //         ['text' => '⚡ gpt-4.1-mini', 'callback_data' => 'setmodel_gpt-4.1-mini'],
-        //         ['text' => '🧩 gpt-4.1-nano', 'callback_data' => 'setmodel_gpt-4.1-nano'],
-        //     ]
-        // ];
+    // Three tiers instead of GPT model names; the backend maps each tier to real models.
+    $tiers = botServices()->settings['tiers'];
+    $row = [];
+    foreach ($tiers as $key => $tier) {
+        $row[] = ['text' => $tier['label'], 'callback_data' => 'setmodel_' . $key];
     }
+    $buttons = [$row];
+
     $remain_pro = getProTimeRemainingStr($chatId);
-    $stmt = $db->prepare("SELECT model FROM users WHERE chat_id = ?");
+    $stmt = $db->prepare("SELECT model FROM " . T_USERS . " WHERE chat_id = ?");
     $stmt->execute([$chatId]);
     $userModel = $stmt->fetchColumn();
-    $text = "🤖 *مدل فعلی شما:* `$userModel`\n\nمدل خود را انتخاب کنید:\n\n(تنها کاربران PRO می توانند مدل ها را تغییر دهند)\n\n$remain_pro";
+    $current = tierLabel(isset($tiers[$userModel]) ? $userModel : botServices()->settings['default_tier']);
+    $text = "🤖 *مدل فعلی شما:* $current\n\n"
+        . "⚡ عادی: سریع، برای گفتگوهای روزمره\n"
+        . "🧠 هوشمند: پاسخ‌های دقیق‌تر\n"
+        . "🚀 فوق هوشمند: قوی‌ترین مدل برای سوال‌های سخت، برنامه‌نویسی و تحلیل\n\n"
+        . "مدل خود را انتخاب کنید:\n\n(تنها کاربران PRO می توانند مدل ها را تغییر دهند)\n\n$remain_pro";
     sendButtons($chatId, $text, $buttons, "Markdown");
     return true;
 }
@@ -162,7 +123,7 @@ if ($lower === '/newchat') {
 
     // Insert empty summary marker → wipes previous context
     $stmt = $db->prepare("
-        INSERT INTO messages (user_id, chat_memory_id, message, type)
+        INSERT INTO " . T_MESSAGES . " (user_id, chat_memory_id, message, type)
         VALUES (?, ?, '', 'SUMMARY')
     ");
     $stmt->execute([$userId, $memoryOwnerId]);
@@ -189,7 +150,7 @@ if ($lower === '/getpro') {
         "💎 *مزایای PRO*\n".
         "• پیام‌های نامحدود\n".
         "• حافظه بلندمدت\n".
-        "• دسترسی به مدل‌های پیشرفته (4.1، 4o، سری 5)\n\n".
+        "• دسترسی به مدل‌های هوشمند 🧠 و فوق هوشمند 🚀\n\n".
         "✨ *دعوت و کسب PRO*\n".
         "لینک یا بنر شخصی خود را به اشتراک بگذارید. هر دوستی که بپیوندد  به اشتراک *PRO* شما اضافه می‌شود:\n\n".
         "*{$refLink}*\n\n".
@@ -198,7 +159,7 @@ if ($lower === '/getpro') {
     sendTelegramMessage($chatId, "بنر با لینک شخصی شما برای ارسال 👇", "Markdown");
     $text = "
     • ربات هوشمند گفتگو
-    • انتخاب مدل‌های پیشرفته GPT 4.1، 4.0 و سری 5\n\n".
+    • انتخاب مدل‌های هوشمند و فوق هوشمند\n\n".
     // "• قابلیت دریافت پیام صوتی و پاسخگویی به زودی
     // • توانایی خلق تصویر با هوش مصنوعی به زودی\n\n".
     "[@{$botUsername}]({$refLink}) \n\n".
@@ -267,10 +228,89 @@ if ($lower === '/buypro') {
     "تمام بسته‌ها شامل :\n".
     "• پیام‌های نامحدود 📩\n".
     "• حافظه بلندمدت 🧠\n".
-    "• دسترسی به مدل‌های پیشرفته (4.1، 4o، سری 5) 🚀\n\n پشتیبانی: @suport_0";
+    "• دسترسی به مدل‌های هوشمند 🧠 و فوق هوشمند 🚀\n".
+    "• تبدیل پیام صوتی به متن 🎤\n\n پشتیبانی: @suport_0";
     sendButtons($userChatId, $text, $buttons, "Markdown");
 
     return true;
 }
+// ----- /premiumstatus [chat_id] -----
+if (preg_match('~^/premiumstatus(?:\s+(\d+))?$~', $lower, $m)) {
+    global $update;
+    $target = (int) $update['message']['from']['id'];
+    if (!empty($m[1])) {
+        if (!isTrustedAdmin()) {
+            return true; // only the admin may look up other users
+        }
+        $target = (int) $m[1];
+    }
+    try {
+        $expiry = botServices()->entitlements($db)->activeExpiry($target);
+    } catch (\Throwable $e) {
+        sendTelegramMessage($chatId, "وضعیت اشتراک صوتی فعلاً قابل بررسی نیست.", '');
+        return true;
+    }
+    sendTelegramMessage($chatId, $expiry
+        ? "🎤 تبدیل صدا به متن برای شما تا {$expiry} فعال است."
+        : "🎤 تبدیل صدا به متن فقط برای خریداران PRO فعال است. برای خرید: /buypro", '');
+    return true;
+}
+
+// ----- admin: /grantpremium <chat_id> <days> [receipt] -----
+// For payments made outside the bot (e.g. card-to-card), after you have checked the payment.
+if (preg_match('~^/grantpremium\s+(\d+)\s+(\d+)(?:\s+(\S{1,100}))?$~', $lower, $m)) {
+    if (!isTrustedAdmin()) {
+        return false; // behave like a normal message for everyone else
+    }
+    global $update;
+    $days = (int) $m[2];
+    if ($days < 1 || $days > 3650) {
+        sendTelegramMessage($chatId, "تعداد روز باید بین 1 تا 3650 باشد.", '');
+        return true;
+    }
+    try {
+        $expiry = botServices()->entitlements($db)->grant((int) $m[1], $days, (int) $update['message']['from']['id'], $m[3] ?? null);
+    } catch (\Throwable $e) {
+        sendTelegramMessage($chatId, "❌ ثبت ناموفق بود. آیا migrate.php را اجرا کرده‌اید؟", '');
+        return true;
+    }
+    makeUserPro(null, (int) $m[1], $expiry); // paid premium also includes the normal PRO benefits
+    sendTelegramMessage($chatId, "✅ اشتراک پرداختی برای {$m[1]} تا {$expiry} فعال شد (PRO + تبدیل صدا به متن).", '');
+    sendTelegramMessage((int) $m[1], "🎉 اشتراک PRO شما فعال شد!\n🎤 تبدیل پیام صوتی به متن هم برای شما فعال است.\n\n" . getProTimeRemainingStr((int) $m[1]));
+    return true;
+}
+
+// ----- admin: /revokepremium <chat_id> -----
+if (preg_match('~^/revokepremium\s+(\d+)$~', $lower, $m)) {
+    if (!isTrustedAdmin()) {
+        return false;
+    }
+    try {
+        $n = botServices()->entitlements($db)->revoke((int) $m[1]);
+    } catch (\Throwable $e) {
+        sendTelegramMessage($chatId, "❌ لغو ناموفق بود. آیا migrate.php را اجرا کرده‌اید؟", '');
+        return true;
+    }
+    sendTelegramMessage($chatId, "✅ {$n} اشتراک صوتی برای {$m[1]} لغو شد.", '');
+    return true;
+}
+
+// ----- admin: /routingstats [days] -----
+if (preg_match('~^/routingstats(?:\s+(\d{1,2}))?$~', $lower, $m)) {
+    if (!isTrustedAdmin()) {
+        return false;
+    }
+    sendTelegramMessage($chatId, botServices()->statsText(max(1, (int) ($m[1] ?? 1))), '');
+    return true;
+}
 return false; // no command matched
+}
+
+// The admin is identified by the sender's id in a private chat, never by anything the user can type.
+function isTrustedAdmin(): bool {
+    global $update, $config;
+    $from = $update['message']['from']['id'] ?? null;
+    $type = $update['message']['chat']['type'] ?? '';
+    return $from !== null && $type === 'private'
+        && (string) $from === (string) $config['telegram']['admin_chatid'];
 }

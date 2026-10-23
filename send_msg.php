@@ -5,7 +5,7 @@ function sendTelegramMessage($chatId, $text, $parseMode = null): void {
 
     $token = $config['telegram']['bot_token'];
     // $url   = "https://api.telegram.org/bot{$token}/sendMessage";
-    $url   = "https://tapi.bale.ai/bot{$token}/sendMessage";
+    $url   = rtrim($config['telegram']['api_base'] ?? 'https://tapi.bale.ai', '/') . "/bot{$token}/sendMessage";
 
     // ---------------- AUTO MARKDOWN DETECT ----------------
     if ($parseMode === null) {
@@ -54,7 +54,7 @@ $chatId = $_GET['chatid'] ?? null;
 $text = $_GET['text'] ?? null;
 $input = $_GET['pass'] ?? '';
 
-if ($input !== $config['admin']['password']) {
+if (!hash_equals((string) $config['admin']['password'], (string) $input)) {
     http_response_code(403);
     echo json_encode(['error' => 'Wrong admin password.']);
     exit;

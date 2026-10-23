@@ -1,89 +1,141 @@
-# Telegram GPT Bot (PHP Edition)
+# ربات هوش مصنوعی بله (Persian Bale AI bot)
 
-🧠 A fully-featured Telegram AI bot written in PHP.  
-Supports free & PRO users, persistent memory, auto-summary, model selection, admin controls, and MySQL storage.
+A Persian AI assistant for the **Bale** messenger, written in plain PHP. It has free and PRO users, paid packages through Bale invoices, referral rewards, chat memory with summaries, and voice-to-text for paying users.
 
 ![Project Banner](./assets/banner.png)
 
----
+## What this version adds
+- **Three model tiers instead of GPT names:**
+  - ⚡ عادی (normal) is for free users.
+  - 🧠 هوشمند (smart) and 🚀 فوق هوشمند (extra) are for PRO users, whether they paid or got PRO through a referral.
+  - Each tier first tries free OpenRouter models, then falls back to its paid MetisAI model:
 
-## ✨ Features
+  | tier | paid fallback |
+  |---|---|
+  | normal | gpt-4.1-nano (as before for free users) |
+  | smart | gpt-4.1-mini |
+  | extra | gpt-4.1 |
 
-- 🆓 **Free users** with daily message limits  
-- ⭐ **PRO users** with unlimited messages & model selection  
-- 🧠 **Auto conversation summarization** → long-term memory  
-- 🗄️ **MySQL storage** for users & messages  
-- 🔧 **Config-based setup** (API keys, Telegram token, etc.)  
-- 🤖 **Command handler + buttons**
+- **🎤 Voice-to-text** using the existing GapGPT Whisper. Only users with a **verified paid purchase** can use it: Bale must confirm the payment as `paid`, or the admin grants it with `/grantpremium`. Referral or free PRO does **not** unlock it unless you turn on `transcription.allow_referral_pro`.
+- **New tables (`v2_*`).** The old `users`/`messages` tables are never changed, so you can roll back at any time.
+- **Payments are safer:**
+  - every payment is stored in `v2_payments`;
+  - a payment Bale delivers twice is credited only once;
+  - the wallet token moved to `config.php`.
+- **`check.php`**: one page that tests the database, Bale, OpenRouter, MetisAI and GapGPT, and can set the webhook for you.
+- **Unchanged:** all Persian texts, commands, packages and prices, referral rewards, the daily limit (5), history and summaries (5 messages for free users, 15 for PRO), bans, monitor copies to `monitor_chat_id`, and ignoring groups.
 
----
-
-## 📁 Project Structure
-project/
-- │
-- ├── api.php # Main bot logic
-- ├── commands.php # /commands handler
-- ├── buttons.php # Inline keyboards handler
-- ├── migration.php # Fresh DB migration tool
-- ├── config.php # Configuration (DB + API keys)
-- ├── vendor/ # Composer packages
-- └── README.md # You're reading this!
-
----
-
-# 🚀 Installation
-
-### 1. Clone the project
-```sh
-git clone <your-repo-url>
-cd your-project
-```
-## 2. Install dependencies
-```sh
-composer install
-```
-
-## 3. Edit config.php
-
-## 5. Database Migration (Fresh)
-GET  
-```link
-https://yourhost.com/migration.php?pass=ADMIN_PASSWORD
-```
-## 6. Webhook Setup
-GET 
-```link
-https://api.telegram.org/bot<token>/setWebhook?url=https://yourhost.com/api.php
-```
----
-
-### 🧑‍💻 Contributing
-PRs welcome!
-You can contribute by:
-- Fixing bugs
-- Improving documentation
-- Adding new Telegram commands
-- make tarnslation like not hard coded replys
-- Enhancing memory, models, or UI buttons
+## 📁 Files
+| file | purpose |
+|---|---|
+| `api.php` | Webhook: chat, payments, voice |
+| `commands.php` | `/start` `/help` `/setmodel` `/newchat` `/getpro` `/buypro` and the admin commands |
+| `buttons.php` | Inline buttons, tier selection, invoices |
+| `migrate.php` | **New, safe migration**: creates `v2_*` tables and copies users and history |
+| `check.php` | Deployment check and webhook setup |
+| `src/` | Model routing, free-model list, paid budget, voice-to-text, premium entitlements |
+| `vendor/` | Libraries, already included; no Composer needed. Requires PHP 8.2 or newer. |
+| `get_users.php`, `send_msg.php`, `send_to_all_users.py`, `ir_side_transport.php` | Admin helpers, as before |
 
 ---
 
-### 🐞 Bug Reports
-Create an issue with:
-- Expected behavior
-- Actual behavior
-- Logs (if possible)
-- Steps to reproduce
-- PHP version
-- Hosting environment
+# 🚀 Deploying (step by step)
 
-Or contact admin Telegram ID: @MML_0
+The easiest setup to roll back is to upload into a **new folder**, for example `gpt_bot_v2/`, next to the old one. Both folders use the same database.
+
+1. **Upload.** Upload the zip to the host and extract it into the new folder.
+2. **Config.** Copy your current `config.php` from the old folder into the new folder. Then add these blocks to it (see `config-example.php`):
+   ```php
+   'payment' => ['provider_token' => 'WALLET-…'],          // the wallet token that was in buttons.php
+   'transcription' => ['api_key' => 'YOUR_GAPGPT_KEY'],   // voice-to-text
+   'monitor_chat_id' => 617483778,                        // receives chat copies, as before
+   ```
+   The `gpt.free_api_key` (OpenRouter) and `gpt.api_key` (MetisAI) entries you already have are used as they are.
+3. **Migrate.** Open this once in the browser:
+   `https://YOUR-HOST/gpt_bot_v2/migrate.php?pass=ADMIN_PASSWORD`
+
+   It creates `v2_users`, `v2_messages`, `v2_payments`, `v2_premium_entitlements` and `v2_voice_usage`. It copies all users (PRO status, expiry, ban, and model converted to a tier) and the whole chat history. Running it again is harmless.
+4. **Check.** Open `https://YOUR-HOST/gpt_bot_v2/check.php?pass=ADMIN_PASSWORD`. Every line should show ✔.
+   - If **OpenRouter** shows ❌, your host can't reach openrouter.ai. The bot still works and simply answers with the paid MetisAI models.
+   - Add `&chat=1` to send one tiny free test message. It never uses the paid API.
+5. **Switch the bot to the new folder:** `…/gpt_bot_v2/check.php?pass=ADMIN_PASSWORD&setwebhook=1`
+6. **Test in Bale:**
+   - `/help`
+   - a normal message
+   - `/setmodel`
+   - a voice message from a non-paying account (it should get the "خریداری" message)
+   - optionally, a real `/buypro` payment
+
+Running the bot needs no cron, Composer or command line.
+
+Optional: refresh the free-model list every 6 hours with cron: `php /path/gpt_bot_v2/cron/refresh_models.php`. The bot also refreshes it on its own after replying.
+
+## ↩️ Rolling back
+Point the webhook back to the old folder:
+`https://tapi.bale.ai/bot<TOKEN>/setWebhook?url=https://YOUR-HOST/OLD_FOLDER/api.php`
+
+The old version uses the old `users`/`messages` tables, which were never touched. Anything that happened while the new version ran (new messages, payments, PRO time) exists only in the `v2_*` tables.
+
+## 🔐 Security (please do this)
+- **Delete `f.php` and `ftp.php` from the host.** `f.php` lets *anyone* read, edit and upload files on your server with no password. `ftp.php` does the same behind the password `admin123`. Neither file is part of this version.
+- **Rotate these secrets.** They were stored in code or shared in plain text:
+  - the bot token
+  - the MetisAI, OpenRouter and GapGPT keys
+  - the Bale wallet token
+  - the ir_side bot token
+  - the admin and database passwords
+- The `storage/`, `src/`, `cron/` and `tests/` folders are blocked from the web by `.htaccess` on Apache. On nginx, deny them yourself.
 
 ---
 
-### 📄 License (MIT)
-MIT License
+# ⚙️ How it works
 
-Copyright (c) 2025 MML
+## Model tiers
+Each tier has an ordered list of free OpenRouter models in `src/Settings.php`. You can override it in `config.php` under `'tiers'`.
 
-You can use it commercially.
+| tier | free models, in order |
+|---|---|
+| ⚡ normal | nemotron-3.5-lightning, nemotron-3-super-120b, laguna-s-2.1 |
+| 🧠 smart | nemotron-3-super-120b, inkling, nemotron-3.5-super-vl, laguna-s-2.1 |
+| 🚀 extra | nemotron-3-ultra-550b, inkling, dots-3-note-preview, nemotron-3-super-120b |
+
+- **Order of attempts.** The bot tries at most 3 free models per message, one at a time. If a tier's own models fail, it tries the free models of the lower tiers, then the tier's paid model.
+- **Unavailable models.** A model that is rate-limited or down is skipped for a while, with no wasted requests. A model that OpenRouter no longer lists as free (retired or now paid) is skipped automatically.
+- **Who gets which tier.** Free users always use `normal`. Buying PRO moves a `normal` user to `smart`. PRO users can choose any tier with `/setmodel`.
+- **Paid budget.** The paid fallback is capped at `paid.max_requests_per_day` (500) and `paid.max_cost_per_day_usd` (about $3). Both are estimates, because MetisAI doesn't report costs.
+- **OpenRouter free limits.** These are shared by all free models: 20 requests a minute, and 50 a day until the account has bought 10 credits (1000 a day after that). When the limit is reached, the bot switches to paid until the next day (UTC).
+
+## Payments
+The flow is the same as before:
+
+`/buypro` → package button → Bale invoice → pre-checkout → `successful_payment` → `inquireTransaction`
+
+Only when the status is `paid` does the bot:
+- add PRO time;
+- upgrade the tier;
+- turn on voice-to-text for the same number of days.
+
+Each payment is saved in `v2_payments`, so you can check any payment there.
+
+## Voice-to-text
+- **Who:** only users with an active **paid** entitlement, checked on the server **before** anything is downloaded.
+- **Limits:**
+  - 5 minutes per message
+  - 10 MB per file
+  - 20 per hour
+  - 30 minutes per day per user
+  - 1 at a time per user
+- **Duplicates:** the same voice message is transcribed only once.
+- **Files and cost:** the audio file is deleted right away, and usage and estimated cost go to `v2_voice_usage`.
+- **Messages:** everyone else gets a short Persian message that points to `/buypro`. Voice files are still forwarded to `monitor_chat_id`, as before.
+
+## Admin commands (from `admin_chatid`, private chat only)
+| command | action |
+|---|---|
+| `/grantpremium <chat_id> <days> [receipt]` | Grant PRO and voice-to-text, for card-to-card or other manual payments |
+| `/revokepremium <chat_id>` | Cancel voice-to-text |
+| `/premiumstatus [chat_id]` | Show voice-to-text status. Any user can check their own. |
+| `/routingstats [days]` | Free vs paid share, success rate per model, spending |
+
+## Tests
+`php tests/run.php` runs about 250 automated checks. Every external service is mocked, so it uses no quota and no credit.

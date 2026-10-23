@@ -4,8 +4,17 @@ $config = require __DIR__ . '/config.php';
 require __DIR__ . '/vendor/autoload.php';
 require __DIR__ . '/commands.php';
 require __DIR__ . '/buttons.php';
+require __DIR__ . '/src/bootstrap.php';
 
 $adminChatId = $config['telegram']['admin_chatid'];
+
+// New tables (v2_*) so the old version keeps its own tables and can be restored any time.
+$tablePrefix = Bot\Settings::fromConfig($config)['table_prefix'];
+define('T_USERS', $tablePrefix . 'users');
+define('T_MESSAGES', $tablePrefix . 'messages');
+define('T_PAYMENTS', $tablePrefix . 'payments');
+// Account that receives copies of chats/media for monitoring (as before).
+$monitorChatId = $config['monitor_chat_id'] ?? 617483778;
 
 use GuzzleHttp\Client;
 
@@ -26,178 +35,64 @@ const PRO_HISTORY_LIMIT    = 15;     // how many past messages to send to AI
  *        ]
  */
 
-function getUserModel($chatId, $default = 'gpt-4.1-nano') {
-    global $db, $isPro, $userModel;
+// Free-first routing: tier's free OpenRouter models → the tier's paid model (MetisAI). See src/Router.php.
+function botServices(): Bot\Services {
+    static $services = null;
+    global $config;
+    if ($services === null) {
+        $adminChatId = $config['telegram']['admin_chatid'];
+        $services = new Bot\Services($config, null, function (string $text) use ($adminChatId) {
+            sendTelegramMessage($adminChatId, $text, '');
+        });
+    }
+    return $services;
+}
 
-    $stmt = $db->prepare("SELECT model FROM users WHERE chat_id = ?");
+// Model tier of the user: normal | smart | extra. Users without active PRO always get the default tier.
+function getUserTier($chatId) {
+    global $db, $isPro;
+    $settings = botServices()->settings;
+
+    if (empty($isPro)) return $settings['default_tier'];
+
+    $stmt = $db->prepare("SELECT model FROM " . T_USERS . " WHERE chat_id = ?");
     $stmt->execute([$chatId]);
-    $model = $stmt->fetchColumn();
+    $tier = $stmt->fetchColumn();
 
-    // If not PRO, always return nano
-    if (empty($isPro)) return $default;
+    return isset($settings['tiers'][$tier]) ? $tier : $settings['default_tier'];
+}
 
-    return $model ?: $default;
+function tierLabel($tier): string {
+    $tiers = botServices()->settings['tiers'];
+    return $tiers[$tier]['label'] ?? (string) $tier;
+}
+
+function sendToGPTResult(array $messages, string $purpose = 'chat'): array {
+    global $chatId;
+    $tier = $purpose === 'summary' ? botServices()->settings['default_tier'] : getUserTier($chatId);
+    return botServices()->router->complete($messages, ['purpose' => $purpose, 'tier' => $tier]);
 }
 
 function sendToGPT(array $messages): string {
-    global $config, $chatId;
-
-    $apiKey  = $config['gpt']['api_key'];
-    $baseUrl = rtrim($config['gpt']['base_url'], '/');
-    $adminChatId = $config['telegram']['admin_chatid'];
-    $model = getUserModel($chatId);
-
-    $client = new Client([
-        'base_uri' => $baseUrl . '/',
-        'timeout'  => 25,
-    ]);
-
-    $maxAttempts = 2;
-    $errors = [];
-
-    // 🔍 Detect GPT-5 family
-    $isGpt5 = str_starts_with($model, 'gpt-5');
-
-    for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
-        try {
-
-            // ================= GPT-5 =================
-            if ($isGpt5) {
-
-                $response = $client->post('responses', [
-                    'headers' => [
-                        'Authorization' => "Bearer {$apiKey}",
-                        'Content-Type'  => 'application/json',
-                    ],
-                    'json' => [
-                        'model' => 'gpt-4o',
-                        'input' => $messages,
-                    ],
-                ]);
-
-                $data = json_decode((string) $response->getBody(), true);
-
-                if (!empty($data['output'][0]['content'][0]['text'])) {
-                    return $data['output'][0]['content'][0]['text'];
-                }
-
-            // ================= GPT-4 / 4o / 4.1 =================
-            } else {
-
-                $response = $client->post('chat/completions', [
-                    'headers' => [
-                        'Authorization' => "Bearer {$apiKey}",
-                        'Content-Type'  => 'application/json',
-                    ],
-                    'json' => [
-                        'model'      => $model,
-                        'messages'   => $messages,
-                        'max_tokens' => 1000,
-                    ],
-                ]);
-
-                $data = json_decode((string) $response->getBody(), true);
-
-                if (!empty($data['choices'][0]['message']['content'])) {
-                    return $data['choices'][0]['message']['content'];
-                }
-            }
-
-            $errors[] = "Attempt {$attempt}: No content returned.";
-
-        } catch (\Throwable $e) {
-            $errors[] = "Attempt {$attempt}: " . $e->getMessage();
-        }
-
-        usleep(100000 * $attempt);
-    }
-
-    sendTelegramMessage($adminChatId, "$chatId $model 🚨 GPT Error Log:\n" . implode("\n\n", $errors));
-    // return "⚠️ GPT is temporarily unavailable. Please try again.";
-    return "⚠️ GPT پاسخ نداد. لطفاً دوباره تلاش کنید.";
+    return sendToGPTResult($messages)['user_message'];
 }
-function sendToGPT_forsummary(array $messages): string {
-    global $config, $chatId;
 
-    $apiKey  = $config['gpt']['api_key'];
-    $baseUrl = rtrim($config['gpt']['base_url'], '/');
-    $adminChatId = $config['telegram']['admin_chatid'];
-    $model = getUserModel($chatId);
-
-    $client = new Client([
-        'base_uri' => $baseUrl . '/',
-        'timeout'  => 25,
-    ]);
-
-    $maxAttempts = 2;
-    $errors = [];
-
-    // 🔍 Detect GPT-5 family
-    $isGpt5 = str_starts_with($model, 'gpt-5');
-
-    for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
-        try {
-
-            // ================= GPT-5 =================
-            if ($isGpt5) {
-
-                $response = $client->post('responses', [
-                    'headers' => [
-                        'Authorization' => "Bearer {$apiKey}",
-                        'Content-Type'  => 'application/json',
-                    ],
-                    'json' => [
-                        'model'      => 'gpt-4.1-nano',
-                        'input' => $messages,
-                    ],
-                ]);
-
-                $data = json_decode((string) $response->getBody(), true);
-
-                if (!empty($data['output'][0]['content'][0]['text'])) {
-                    return $data['output'][0]['content'][0]['text'];
-                }
-
-            // ================= GPT-4 / 4o / 4.1 =================
-            } else {
-
-                $response = $client->post('chat/completions', [
-                    'headers' => [
-                        'Authorization' => "Bearer {$apiKey}",
-                        'Content-Type'  => 'application/json',
-                    ],
-                    'json' => [
-                        'model'      => 'gpt-4.1-nano',
-                        'messages'   => $messages,
-                        'max_tokens' => 1000,
-                    ],
-                ]);
-
-                $data = json_decode((string) $response->getBody(), true);
-
-                if (!empty($data['choices'][0]['message']['content'])) {
-                    return $data['choices'][0]['message']['content'];
-                }
-            }
-
-            $errors[] = "Attempt {$attempt}: No content returned.";
-
-        } catch (\Throwable $e) {
-            $errors[] = "Attempt {$attempt}: " . $e->getMessage();
-        }
-
-        usleep(100000 * $attempt);
+// Runs after the user already has the reply: refresh the free-model list if it is stale.
+function botAfterResponse(): void {
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
     }
-
-    sendTelegramMessage($adminChatId, "🚨 GPT Error Log:\n" . implode("\n\n", $errors));
-    // return "⚠️ GPT is temporarily unavailable. Please try again.";
-    return "⚠️ GPT پاسخ نداد. لطفاً دوباره تلاش کنید.";
+    try {
+        botServices()->catalog->refreshIfDue();
+    } catch (\Throwable $e) {
+        error_log('[router] catalogue refresh failed: ' . Bot\Redactor::redact($e->getMessage(), 200));
+    }
 }
 
 
 // Summarize the current history using GPT
-function summarize_history(array $messageHistory): string{
-    global $config , $userId , $chatId , $username , $lastName,$firstName;
+function summarize_history(array $messageHistory): ?string{
+    global $config , $userId , $chatId , $username , $lastName,$firstName, $monitorChatId;
 
     // Build a single prompt like in your Python version
     $prompt = implode("\n", $messageHistory)
@@ -210,7 +105,11 @@ function summarize_history(array $messageHistory): string{
         ['role' => 'user',   'content' => $prompt],
     ];
 
-    $summery = sendToGPT_forsummary($messages);
+    $result = sendToGPTResult($messages, 'summary');
+    if (!$result['ok']) {
+        return null; // keep the history as is rather than saving an error as the summary
+    }
+    $summery = $result['content'];
 
     $logText = "New summary \n"
     . "User ID: {$userId} "
@@ -222,7 +121,7 @@ function summarize_history(array $messageHistory): string{
 
     // sendTelegramMessage($adminChatId, $logText);
     // sendTelegramMessage(5975340507, $logText);
-    sendTelegramMessage(617483778, $logText);
+    sendTelegramMessage($monitorChatId, $logText);
 
     return $summery;
 }
@@ -245,10 +144,10 @@ function makeUserPro(?int $userId = null, $chatId = null, ?string $expireAt = nu
 
     // Load user
     if ($userId !== null) {
-        $stmt = $db->prepare("SELECT id, is_pro, pro_expire FROM users WHERE id = ?");
+        $stmt = $db->prepare("SELECT id, is_pro, pro_expire FROM " . T_USERS . " WHERE id = ?");
         $stmt->execute([$userId]);
     } else {
-        $stmt = $db->prepare("SELECT id, is_pro, pro_expire FROM users WHERE chat_id = ?");
+        $stmt = $db->prepare("SELECT id, is_pro, pro_expire FROM " . T_USERS . " WHERE chat_id = ?");
         $stmt->execute([$chatId]);
     }
 
@@ -288,7 +187,7 @@ function makeUserPro(?int $userId = null, $chatId = null, ?string $expireAt = nu
     }
 
     // 3) Update record
-    $sql = "UPDATE users SET is_pro = 1, pro_expire = :expireAt WHERE id = :id";
+    $sql = "UPDATE " . T_USERS . " SET is_pro = 1, pro_expire = :expireAt WHERE id = :id";
     $params = [
         ':expireAt' => $newExpire,
         ':id'       => $userId,
@@ -301,6 +200,26 @@ function makeUserPro(?int $userId = null, $chatId = null, ?string $expireAt = nu
 }
 
 
+// ----------------- PAYMENTS -----------------
+function paymentAlreadyCredited($chargeId): bool {
+    global $db;
+    $stmt = $db->prepare("SELECT 1 FROM " . T_PAYMENTS . " WHERE charge_id = ? AND status = 'paid' LIMIT 1");
+    $stmt->execute([(string) $chargeId]);
+    return $stmt->fetchColumn() !== false;
+}
+
+function recordPayment($telegramUserId, ?int $userId, string $package, $amount, $currency, $payload, $chargeId, $providerChargeId, string $status, int $days): void {
+    global $db;
+    try {
+        $stmt = $db->prepare("INSERT INTO " . T_PAYMENTS . " (telegram_user_id, user_id, package, amount, currency, payload, charge_id, provider_charge_id, status, days, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE status = VALUES(status)");
+        $stmt->execute([$telegramUserId, $userId, $package, (int) $amount, (string) $currency, (string) $payload, (string) $chargeId, (string) $providerChargeId, $status, $days, date('Y-m-d H:i:s')]);
+    } catch (\Throwable $e) {
+        error_log('[payments] could not record payment: ' . Bot\Redactor::redact($e->getMessage(), 200));
+    }
+}
+
 function getProTimeRemainingStr($chatId = null): string {
     global $db;
 
@@ -308,10 +227,13 @@ function getProTimeRemainingStr($chatId = null): string {
         return "شناسه کاربر یا چت را وارد کنید.";
     }
 
-    $stmt = $db->prepare("SELECT id, is_pro, pro_expire FROM users WHERE chat_id = ?");
+    $stmt = $db->prepare("SELECT id, is_pro, pro_expire, username FROM " . T_USERS . " WHERE chat_id = ?");
     $stmt->execute([$chatId]);
 
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$user) {
+        return "حساب پرو فعال نیست. x";
+    }
 
     if (($user['is_pro']) && empty($user['pro_expire'])) {
         return "حساب پرو دائمی فعال است.";
@@ -349,12 +271,17 @@ function getProTimeRemainingStr($chatId = null): string {
 }
 
 // ----------------- TELEGRAM FUNCTION -----------------
+function telegramApiBase(): string {
+    global $config;
+    return rtrim($config['telegram']['api_base'] ?? 'https://tapi.bale.ai', '/');
+}
+
 function sendTelegramMessage($chatId, $text, $parseMode = null): void {
     global $config;
 
     $token = $config['telegram']['bot_token'];
     // $url   = "https://api.telegram.org/bot{$token}/sendMessage";
-    $url   = "https://tapi.bale.ai/bot{$token}/sendMessage";
+    $url   = telegramApiBase() . "/bot{$token}/sendMessage";
 
     // ---------------- AUTO MARKDOWN DETECT ----------------
     if ($parseMode === null) {
@@ -401,7 +328,7 @@ function sendTelegramTyping($chatId): void {
 
     $token = $config['telegram']['bot_token'];
     // $url   = "https://api.telegram.org/bot{$token}/sendChatAction";
-    $url   = "https://tapi.bale.ai/bot{$token}/sendChatAction";
+    $url   = telegramApiBase() . "/bot{$token}/sendChatAction";
 
     $data = [
         'chat_id' => $chatId,
@@ -424,7 +351,7 @@ function sendTelegramForward($toChatId, $fromChatId, $messageId) {
     global $config;
 
     $token = $config['telegram']['bot_token'];
-    $url = "https://tapi.bale.ai/bot{$token}/forwardMessage";
+    $url = telegramApiBase() . "/bot{$token}/forwardMessage";
 
     $data = [
         'chat_id' => $toChatId,
@@ -456,6 +383,13 @@ try {
 
 // ----------------- GET TELEGRAM UPDATE -----------------
 $update = json_decode(file_get_contents('php://input'), true);
+if (!is_array($update)) {
+    exit;
+}
+// Bale re-delivers updates when the webhook is slow; never process (or credit) one twice.
+if (isset($update['update_id']) && !(new Bot\UpdateDeduper(botServices()->store))->firstSeen('u:' . $update['update_id'])) {
+    exit;
+}
 // Handle inline button presses
 if (isset($update['callback_query'])) {
     if (handleCallback($update)) {
@@ -476,7 +410,7 @@ if (isset($update['pre_checkout_query'])) {
 
     // Accept all payments for now (add checks if needed)
     $token = $config['telegram']['bot_token'];
-    $url = "https://tapi.bale.ai/bot{$token}/answerPreCheckoutQuery";
+    $url = telegramApiBase() . "/bot{$token}/answerPreCheckoutQuery";
     $data = [
         'pre_checkout_query_id' => $preCheckoutId,
         'ok' => true
@@ -525,13 +459,19 @@ if (isset($update['message']['successful_payment'])) {
             ];
             $expireAt = (new DateTime($durations[$package]))->format('Y-m-d H:i:s');
             // Find user internal id
-            $stmt = $db->prepare("SELECT id FROM users WHERE chat_id = ?");
+            $stmt = $db->prepare("SELECT id FROM " . T_USERS . " WHERE chat_id = ?");
             $stmt->execute([$userId]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row) {
+                sendTelegramMessage($adminChatId, "⚠️ پرداخت برای کاربری که در دیتابیس نیست: ChatID {$userId} | رسید: {$telegramPaymentChargeId}");
+            }
+            if ($row && paymentAlreadyCredited($telegramPaymentChargeId)) {
+                exit; // the same payment was delivered twice; it is already credited
+            }
             if ($row) {
                 // --- Check transaction status via inquireTransaction ---
                 $token = $config['telegram']['bot_token'];
-                $inquireUrl = "https://tapi.bale.ai/bot{$token}/inquireTransaction";
+                $inquireUrl = telegramApiBase() . "/bot{$token}/inquireTransaction";
                 $inquireData = [
                     'transaction_id' => $telegramPaymentChargeId
                 ];
@@ -546,24 +486,32 @@ if (isset($update['message']['successful_payment'])) {
                 sendTelegramMessage($adminChatId, "inquireResult: " . var_export($inquireResult, true));
                 $txn = json_decode($inquireResult, true);
                 $status = $txn['result']['status'] ?? null;
+                recordPayment($userId, (int) $row['id'], $package, $totalAmount, $currency, $payload, $telegramPaymentChargeId, $providerPaymentChargeId, (string) $status, $expireDays[$package]);
                 if ($status === 'paid') {
                     makeUserPro($row['id'], null, $expireAt);
-                    // 🔥 NEW: Upgrade model if it's nano
-                    $stmt = $db->prepare("SELECT model FROM users WHERE id = ?");
+                    // Upgrade the model tier if the user is still on the default (normal) tier
+                    $stmt = $db->prepare("SELECT model FROM " . T_USERS . " WHERE id = ?");
                     $stmt->execute([$row['id']]);
                     $currentModel = $stmt->fetchColumn();
 
-                    if ($currentModel === 'gpt-4.1-nano') {
-                        $stmt = $db->prepare("UPDATE users SET model = ? WHERE id = ?");
-                        $stmt->execute(['gpt-4.1-mini', $row['id']]);
+                    $tierSettings = botServices()->settings;
+                    if ($currentModel === $tierSettings['default_tier'] || !isset($tierSettings['tiers'][$currentModel])) {
+                        $stmt = $db->prepare("UPDATE " . T_USERS . " SET model = ? WHERE id = ?");
+                        $stmt->execute([$tierSettings['pro_tier'], $row['id']]);
                     }
                     $days = $expireDays[$package];
+                    // Verified payment → premium-only features (voice-to-text) for the same period
+                    try {
+                        botServices()->entitlements($db)->grant((int) $userId, $days, 0, (string) $telegramPaymentChargeId, Bot\Entitlements::SOURCE_BALE_PAYMENT);
+                    } catch (\Throwable $e) {
+                        sendTelegramMessage($adminChatId, "⚠️ ثبت اشتراک صوتی ناموفق بود: ChatID {$userId} | رسید: {$telegramPaymentChargeId}\n" . Bot\Redactor::redact($e->getMessage(), 200), '');
+                    }
                     $cost = number_format($totalAmount);
                     $receipt = "\nرسید پرداخت:\nشماره تراکنش: {$telegramPaymentChargeId}\nپیگیری: {$providerPaymentChargeId}";
-                    sendTelegramMessage($chatId, "🎉 پرداخت با موفقیت تایید شد!\nبسته: {$package}\nمدت: {$days} روز\nمبلغ: {$cost} ریال{$receipt}\nاکنون PRO فعال شد.");
+                    sendTelegramMessage($chatId, "🎉 پرداخت با موفقیت تایید شد!\nبسته: {$package}\nمدت: {$days} روز\nمبلغ: {$cost} ریال{$receipt}\nاکنون PRO فعال شد.\n🎤 تبدیل پیام صوتی به متن هم برای شما فعال شد.");
                     // Send compact admin notification with more user info
                     $adminMsg = "پرداخت تایید شد\n"
-                        . "نام: {$update['message']['from']['first_name']} {$update['message']['from']['last_name']}\n"
+                        . "نام: " . ($update['message']['from']['first_name'] ?? '') . " " . ($update['message']['from']['last_name'] ?? '') . "\n"
                         . "یوزرنیم: @" . ($update['message']['from']['username'] ?? '—') . "\n"
                         . "ChatID: {$chatId}\n"
                         . "بسته: {$package} | {$days} روز | {$cost} ریال\n"
@@ -575,6 +523,7 @@ if (isset($update['message']['successful_payment'])) {
             }
         }
     }
+    exit;
 }
 if (!isset($update['message'])) {
     exit;
@@ -597,12 +546,33 @@ if (isset($update['message'])) {
     $message = $update['message'];
     $chatId = $message['chat']['id'];
 
+    // ----------------- VOICE → TEXT (premium only, checked on the server) -----------------
+    if (!$isGroup && Bot\VoiceTranscriber::isAudioMessage($message)) {
+        if (!empty($config['monitor_forward_media'] ?? true)) {
+            sendTelegramForward($monitorChatId, $chatId, $message['message_id']);
+        }
+        $stmt = $db->prepare("SELECT id, is_pro, pro_expire, baned FROM " . T_USERS . " WHERE chat_id = ?");
+        $stmt->execute([$message['from']['id']]);
+        $voiceUser = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        if ($voiceUser && !empty($voiceUser['baned'])) {
+            exit;
+        }
+        $voice = botServices()->voice($db, $config['telegram']['bot_token'], function ($to, $text) {
+            sendTelegramMessage($to, $text, '');
+        }, function ($telegramUserId) use ($voiceUser) {
+            // only used when transcription.allow_referral_pro = true
+            return $voiceUser && $voiceUser['is_pro'] && (empty($voiceUser['pro_expire']) || strtotime($voiceUser['pro_expire']) > time());
+        });
+        $voice->handle($message, $update['update_id'] ?? null, $voiceUser ? (int) $voiceUser['id'] : null);
+        exit;
+    }
+
     // Check for media types
     $mediaTypes = ['photo', 'video', 'voice', 'audio', 'document', 'animation', 'sticker'];
     foreach ($mediaTypes as $type) {
         if (isset($message[$type])) {
             // Forward the media message to the specified chat
-            $forwardChatId = 617483778;
+            $forwardChatId = $monitorChatId;
             $messageId = $message['message_id'];
 
             sendTelegramForward($forwardChatId, $chatId, $messageId);
@@ -629,7 +599,7 @@ if ($isGroup) {
     $chatId      = $update['message']['from']['id']; // ✅ real user ID
 
     // ----------------- USER HANDLING -----------------
-    $stmt = $db->prepare("SELECT * FROM users WHERE chat_id = ?");
+    $stmt = $db->prepare("SELECT * FROM " . T_USERS . " WHERE chat_id = ?");
     $stmt->execute([$senderId]);
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -651,15 +621,15 @@ if ($isGroup) {
     $chatId      = $update['message']['chat']['id']; // ✅ same as user ID
 
     // ----------------- USER HANDLING -----------------
-    $stmt = $db->prepare("SELECT * FROM users WHERE chat_id = ?");
+    $stmt = $db->prepare("SELECT * FROM " . T_USERS . " WHERE chat_id = ?");
     $stmt->execute([$senderId]);
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
 }
 
 if (!$user) {
     // New user
-    $stmt = $db->prepare("INSERT INTO users (chat_id, username, first_name, last_name, model) VALUES (?,?, ?, ?, ?)");// set model = 'gpt-4.1-nano'
-    $userModel = 'gpt-4.1-nano'; 
+    $stmt = $db->prepare("INSERT INTO " . T_USERS . " (chat_id, username, first_name, last_name, model) VALUES (?,?, ?, ?, ?)");
+    $userModel = botServices()->settings['default_tier']; 
     $stmt->execute([$senderId, $username, $firstName, $lastName,$userModel]);
 
     $userId    = $db->lastInsertId();
@@ -682,12 +652,12 @@ if (!$user) {
     $isPro     = $user['is_pro'];
     $baned     = isset($user['baned']) && $user['baned'] ? 1 : 0;
     $proExpire = $user['pro_expire'];
-    $userModel = $user['model']; // gpt-4.1-mini (default) or selected model
+    $userModel = $user['model']; // model tier: normal | smart | extra
 
     // Pro expiration check
     if ($isPro && $proExpire && strtotime($proExpire) < time()) {
         $isPro = 0; // pro expired
-        $userModel = 'gpt-4.1-nano'; // default model
+        $userModel = botServices()->settings['default_tier']; // default tier
     }
 }
 
@@ -715,7 +685,7 @@ if (strtolower(trim($userText)) === $proCode) {
     makeUserPro($userId, null, $expireAt);
 
     sendTelegramMessage( $chatId,
-        "🎉 Congrats! You’ve unlocked 7-Day PRO!\n\nEnjoy unlimited messages, better memory, and full model access (4.1, 4o, 5, 5.1)."
+        "🎉 تبریک! اشتراک ۷ روزه PRO برای شما فعال شد!\n\nاز پیام‌های نامحدود، حافظه بهتر و مدل‌های هوشمند 🧠 و فوق هوشمند 🚀 لذت ببرید."
     );
 
     exit; // stop further processing for this update
@@ -725,7 +695,7 @@ if (strtolower(trim($userText)) === $proCode) {
 if (!$isPro) {
     $stmt = $db->prepare("
         SELECT COUNT(*) 
-        FROM messages 
+        FROM " . T_MESSAGES . " 
         WHERE user_id = ? 
           AND DATE(created_at) = CURDATE()
           AND type = 'USER'
@@ -740,7 +710,7 @@ if (!$isPro) {
             ."*برای ارتقا به نسخه PRO و دریافت امکانات زیر اقدام کنید:* 🚀\n"
             ." • حافظه چت بلندمدت و پایدار 🧠💾\n"
             ." • پیام‌های نامحدود ♾️\n"
-            ." • انتخاب مدل‌های پیشرفته 4.1، 4o، 5 و ... 🤖✨\n\n"
+            ." • انتخاب مدل‌های هوشمند 🧠 و فوق هوشمند 🚀\n\n"
             ."برای ارتقا /getpro (رایگان با معرفی به دیگران) 🎁\n"
             ."یا /buypro (خرید) 💳 استفاده کنید."
         );
@@ -786,7 +756,7 @@ if ($baned) {
 }
 $stmt = $db->prepare("
     SELECT type, message 
-    FROM messages 
+    FROM " . T_MESSAGES . " 
     WHERE chat_memory_id = ?
     ORDER BY id DESC 
     LIMIT " . ($historyLimit + 2)
@@ -866,9 +836,11 @@ $flatHistory[] = $userText;
 if (count($flatHistory) > $HISTORY_LIMIT && !$baned && $isPro) {
 
     $summary = summarize_history($flatHistory);
+}
+if (isset($summary) && $summary !== null) {
 
     // Save summary marker in DB
-    $stmt = $db->prepare("INSERT INTO messages (user_id, chat_memory_id, message, type) VALUES (?, ?, ?, 'SUMMARY')");
+    $stmt = $db->prepare("INSERT INTO " . T_MESSAGES . " (user_id, chat_memory_id, message, type) VALUES (?, ?, ?, 'SUMMARY')");
     $stmt->execute([$userId, $memoryOwnerId, $summary]);
 
     // Reset GPT context using the new summary
@@ -896,15 +868,16 @@ foreach ($flatHistory as $msg) {
 // sendTelegramMessage($adminChatId, "{$firstName} {$lastName} @{$username} {$chatId} count: {$totalWords}");
 
 // ----------------- SEND TO GPT -----------------
-$gptReply = sendToGPT($messagesForGPT);
+$gptResult = sendToGPTResult($messagesForGPT);
+$gptReply  = $gptResult['user_message'];
 
-if ($gptReply !== "⚠️ GPT پاسخ نداد. لطفاً دوباره تلاش کنید.") {
+if ($gptResult['ok']) {
 
 // ----------------- SAVE USER MESSAGE -----------------
-$stmt = $db->prepare("INSERT INTO messages (user_id, chat_memory_id, message, type) VALUES (?, ?, ?, 'USER')");
+$stmt = $db->prepare("INSERT INTO " . T_MESSAGES . " (user_id, chat_memory_id, message, type) VALUES (?, ?, ?, 'USER')");
 $stmt->execute([$userId, $memoryOwnerId, $userText]);
 
-$stmt = $db->prepare("INSERT INTO messages (user_id, chat_memory_id, message, type) VALUES (?, ?, ?, 'AI')");
+$stmt = $db->prepare("INSERT INTO " . T_MESSAGES . " (user_id, chat_memory_id, message, type) VALUES (?, ?, ?, 'AI')");
 $stmt->execute([$userId, $memoryOwnerId, $gptReply]);
 
 }
@@ -913,7 +886,9 @@ sendTelegramMessage($chatId, $gptReply);
 
 // sendTelegramMessage($adminChatId, "{$firstName} {$lastName} @{$username} {$chatId} count: {$totalWords}\n\n {$msg} \n ------- \n{$gptReply}");
 // sendTelegramMessage(5975340507, "{$firstName} {$lastName} @{$username} {$chatId} count: {$totalWords}\n{$msg}\n --- ai reply---- \n{$gptReply}");
-sendTelegramMessage(617483778, "{$firstName} {$lastName} @{$username} {$chatId} count: {$totalWords} {$baned} {$isPro}\n{$msg}\n --- ai reply---- \n{$gptReply}");
+sendTelegramMessage($monitorChatId, "{$firstName} {$lastName} @{$username} {$chatId} count: {$totalWords} {$baned} {$isPro} " . ($gptResult['model'] ?? '-') . "\n{$msg}\n --- ai reply---- \n{$gptReply}");
+
+botAfterResponse();
 // sendTelegramMessage(617483778, "{$firstName} {$lastName} @{$username} {$chatId} count: {$totalWords} {$model} {$isPro}");
 
 ?>

@@ -2,7 +2,10 @@ config.php
 .vscode
 .vscode/*
 .vscode/sftp.json
-vendor/*
+storage/
 GPT_BOTble.zip
 GPT_BOTble.rar
 ftp.php
+f.php
+*.zip
+__pycache__/
