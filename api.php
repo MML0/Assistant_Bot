@@ -293,9 +293,9 @@ function telegramApiBase(): string {
 
 /**
  * Calls a Bale Bot API method and returns the decoded answer (['ok' => false, ...] on failure).
- * Sends JSON first (real true/false and arrays). Only if Bale explicitly rejects that, the same
- * call is repeated once in the form encoding the old code used; never after a network error,
- * so an invoice cannot be sent twice.
+ * First sends exactly what the old code sent (form fields; true → "1", lists as JSON text).
+ * Only if Bale explicitly rejects that, the same call is repeated once as JSON. Never repeated
+ * after a network error, so an invoice cannot be sent twice.
  */
 function baleCall(string $method, array $params, int $timeout = 8): array {
     global $config;
@@ -320,11 +320,12 @@ function baleCall(string $method, array $params, int $timeout = 8): array {
         return is_array($json) ? $json + ['_http' => $code] : ['ok' => false, '_http' => $code, 'description' => mb_substr($raw, 0, 200)];
     };
 
-    $res = $send(json_encode($params, JSON_UNESCAPED_UNICODE), ['Content-Type: application/json']);
+    // Old format: what api.php/buttons.php always sent to Bale.
+    $form = array_map(fn ($v) => is_array($v) ? json_encode($v, JSON_UNESCAPED_UNICODE) : (is_bool($v) ? ($v ? '1' : '0') : $v), $params);
+    $res = $send($form, []);
     if (is_array($res) && empty($res['ok'])) {
-        $form = array_map(fn ($v) => is_array($v) ? json_encode($v, JSON_UNESCAPED_UNICODE) : (is_bool($v) ? ($v ? 'true' : 'false') : $v), $params);
-        $res2 = $send($form, []);
-        if (is_array($res2)) {
+        $res2 = $send(json_encode($params, JSON_UNESCAPED_UNICODE), ['Content-Type: application/json']);
+        if (is_array($res2) && !empty($res2['ok'])) {
             return $res2;
         }
     }
@@ -461,17 +462,16 @@ if (isset($update['pre_checkout_query'])) {
 
     $preCheckout = $update['pre_checkout_query'];
     $preCheckoutId = $preCheckout['id'];
-    $payload = $preCheckout['invoice_payload'] ?? null;
 
-    // Accept every invoice this bot created (buypro_{package}_{userId}_{time}).
-    $okToPay = $payload === null || (bool) preg_match('/^buypro_(smart|economic|pro)_([0-9]+)_/', (string) $payload);
-    $answer = ['pre_checkout_query_id' => $preCheckoutId, 'ok' => $okToPay];
-    if (!$okToPay) {
-        $answer['error_message'] = 'این فاکتور معتبر نیست. لطفاً دوباره /buypro را بزنید.';
-    }
-    $result = baleCall('answerPreCheckoutQuery', $answer, 6);
+    // Accept all payments, exactly as before (the real check is inquireTransaction after payment).
+    $result = baleCall('answerPreCheckoutQuery', [
+        'pre_checkout_query_id' => $preCheckoutId,
+        'ok' => true,
+    ], 6);
     if (empty($result['ok'])) {
         sendTelegramMessage($adminChatId, "⚠️ answerPreCheckoutQuery ناموفق بود (پرداخت کاربر تایید نشد):\n" . Bot\Redactor::redact(json_encode($result, JSON_UNESCAPED_UNICODE), 300), '');
+    } elseif (!empty($config['payment']['debug'] ?? true)) {
+        sendTelegramMessage($adminChatId, "✅ pre-checkout تایید شد: " . ($preCheckout['from']['id'] ?? '?') . " | " . ($preCheckout['invoice_payload'] ?? ''), '');
     }
     exit;
 }

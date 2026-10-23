@@ -110,8 +110,9 @@ The flow is the same as before:
 
 `/buypro` → package button → **sendInvoice** → user pays → **pre-checkout** → **successful_payment** → **inquireTransaction**
 
-- **Invoice:** sent as JSON with the prices as a real list. If Bale refuses it (for example because the wallet token is wrong or missing), the user gets an error message and the admin sees Bale's exact reason. The user is no longer told "invoice sent" when it wasn't.
-- **Accepting the payment (pre-checkout):** Bale waits at most 10 seconds for the bot to answer `ok = true`. The bot answers right away with a real boolean `true`, and you get an alert if Bale rejects the answer. Invoices this bot didn't create are refused with a Persian reason.
+- **Same requests as before:** the invoice, the pre-checkout answer and the transaction check are sent to Bale exactly as the old code sent them (form fields, `ok=1`). Only if Bale rejects one is it retried once as JSON.
+- **Invoice:** if Bale refuses it (for example because the wallet token is wrong), the user gets an error message and the admin sees Bale's exact reason.
+- **Accepting the payment (pre-checkout):** every payment is accepted, as before, within Bale's 10-second limit. The admin gets a short "pre-checkout تایید شد" line for each one, or Bale's error if the answer failed. Turn the line off with `'payment' => ['debug' => false]`.
 - **Confirming:** the bot asks `inquireTransaction` (with `transaction_id`) up to 4 times over about 6 seconds, because the transaction can still be "pending" when the payment message arrives. `paid` is accepted in any letter case.
 - **Only after confirmation** does the bot add PRO time, upgrade the tier and turn on voice-to-text for the same number of days.
 - **Never credited twice:** a payment Bale sends twice, or one you already credited by hand, is never credited again.
