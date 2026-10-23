@@ -101,6 +101,18 @@ echo "\n== Paid API (MetisAI) — no tokens used\n";
 try {
     $res = $http->get(rtrim($config['gpt']['base_url'], '/') . '/models', ['headers' => ['Authorization' => 'Bearer ' . $config['gpt']['api_key']]]);
     $ok($res->getStatusCode() < 500 && $res->getStatusCode() !== 401, 'reachable', 'HTTP ' . $res->getStatusCode());
+    // Which paid models of each tier this key can use. The bot uses them in this order and skips
+    // one for a day when MetisAI says it is retired (gpt-4.1-nano was shut down on 2026-10-23).
+    $ids = array_column(json_decode((string) $res->getBody(), true)['data'] ?? [], 'id');
+    if ($ids) {
+        foreach ($services->settings['tiers'] as $name => $tier) {
+            $marks = array_map(fn ($m) => (in_array($m, $ids, true) ? '✔ ' : '✘ ') . $m, $tier['paid_models']);
+            $have = (bool) array_intersect($tier['paid_models'], $ids);
+            $ok($have, "tier {$name}: " . implode(' · ', $marks), $have ? '' : 'none of these is offered: set tiers.' . $name . '.paid_models in config.php');
+        }
+    } else {
+        echo "  ℹ MetisAI did not list its models; the bot finds the working one by itself.\n";
+    }
 } catch (Throwable $e) {
     $ok(false, 'reachable', Bot\Redactor::redact($e->getMessage(), 200));
 }

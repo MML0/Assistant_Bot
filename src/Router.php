@@ -38,7 +38,7 @@ final class Router
     }
 
     /**
-     * @param array $opts purpose: chat|summary, tier (normal|smart|extra), paid_model, explicit_paid, tools, request_id
+     * @param array $opts purpose: chat|summary, tier (normal|smart|extra), paid_model(s), explicit_paid, tools, request_id
      * @return array ok, content, tier (free|paid|null), model, free_confirmed, error_class, user_message, attempts
      */
     public function complete(array $messages, array $opts = []): array
@@ -173,10 +173,11 @@ final class Router
             return $this->finish($base, $start, $attempts, false, null, null, null, null, $lastError['class'] ?? $why, $fallbackReason ?? $why, $this->msg('unavailable'));
         }
 
-        $paidModel = $opts['paid_model'] ?? ($tier ? $this->s['tiers'][$tier]['paid_model'] : null) ?? $this->s['paid']['default_model'];
+        $paidModels = $opts['paid_models'] ?? (isset($opts['paid_model']) ? [$opts['paid_model']] : null)
+            ?? ($tier ? $this->s['tiers'][$tier]['paid_models'] : null) ?? [$this->s['paid']['default_model']];
         $paidDeadline = ($explicitPaid || $mode === 'paid_only') ? $start + (float) $r['total_deadline_seconds'] : $deadline;
         $paidAttempt = $attempts;
-        $res = $this->paid->complete($paidModel, $messages, $paidDeadline, function (array $a) use (&$paidAttempt, $base, $fallbackReason) {
+        $res = $this->paid->complete($paidModels, $messages, $paidDeadline, function (array $a) use (&$paidAttempt, $base, $fallbackReason) {
             $paidAttempt++;
             $this->log->record('attempt', $base + [
                 'attempt' => $paidAttempt, 'tier' => 'paid', 'model' => $a['model_used'], 'free' => false,

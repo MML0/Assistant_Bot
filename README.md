@@ -12,9 +12,11 @@ A Persian AI assistant for the **Bale** messenger, written in plain PHP. It has 
 
   | tier | paid fallback |
   |---|---|
-  | normal | gpt-4.1-nano (as before for free users) |
-  | smart | gpt-4.1-mini |
-  | extra | gpt-4.1 |
+  | normal | gpt-5.4-nano → gpt-5-nano → gpt-4o-mini |
+  | smart | gpt-5.4-mini → gpt-5-mini → gpt-4.1-mini → gpt-4o-mini |
+  | extra | gpt-5.4 → gpt-5 → gpt-4.1 → gpt-4o |
+
+  The first model MetisAI offers answers. OpenAI retires models: gpt-4.1-nano was shut down on 2026-10-23, and gpt-4o, gpt-4o-mini, gpt-4.1 and gpt-4.1-mini follow on 2027-01-14. When MetisAI answers that a model is retired, the bot uses the next one at once and skips the retired one for a day, so a retirement never stops the bot. `check.php` shows which of these models your key can use (✔ / ✘).
 
 - **🎤 Voice-to-text** using the existing GapGPT Whisper. Only users with a **verified paid purchase** can use it: Bale must confirm the payment as `paid`, or the admin grants it with `/grantpremium`. Referral or free PRO does **not** unlock it unless you turn on `transcription.allow_referral_pro`.
 - **New tables (`v2_*`).** The old `users`/`messages` tables are never changed, so you can roll back at any time.
@@ -100,7 +102,7 @@ Each tier has an ordered list of free OpenRouter models in `src/Settings.php`. Y
 | 🧠 smart | nemotron-3-super-120b, inkling, nemotron-3.5-super-vl, laguna-s-2.1 |
 | 🚀 extra | nemotron-3-ultra-550b, inkling, dots-3-note-preview, nemotron-3-super-120b |
 
-- **Order of attempts.** The bot tries at most 3 free models per message, one at a time. If a tier's own models fail, it tries the free models of the lower tiers, then the tier's paid model.
+- **Order of attempts.** The bot tries at most 3 free models per message, one at a time. If a tier's own models fail, it tries the free models of the lower tiers, then the tier's paid models (MetisAI), at most 3 paid calls per message. A failed MetisAI request is tried once more, like the old bot.
 - **Slow or filtered OpenRouter.** If a free model doesn't answer within 15 seconds, the message is answered by MetisAI right away, and free models are skipped for 2 minutes (then 4, 8, 16, up to 30 minutes while it keeps happening). From a host where OpenRouter hangs, only one message now and then waits 15 seconds.
 - **Unavailable models.** A model that is rate-limited or down is skipped for a while, with no wasted requests. A model that OpenRouter no longer lists as free (retired or now paid) is skipped automatically.
 - **Who gets which tier.** Free users always use `normal`. Buying PRO moves a `normal` user to `smart`. PRO users can choose any tier with `/setmodel`.

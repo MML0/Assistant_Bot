@@ -131,7 +131,8 @@ final class ErrorClassifier
                 if ($isContext) {
                     return self::make(self::CONTEXT, $status, $msg);
                 }
-                if (preg_match('~not a valid model|invalid model|model not found|unknown model~', $m)) {
+                // "The model `gpt-4.1-nano` has been deprecated", "The model `x` does not exist…"
+                if (preg_match('~not a valid model|invalid model|model not found|model_not_found|unknown model|model\b.{0,60}\b(deprecated|decommissioned|retired|does not exist|no longer (available|supported))~', $m)) {
                     return self::make(self::INVALID_MODEL, $status, $msg);
                 }
                 if ($isUnsupported) {

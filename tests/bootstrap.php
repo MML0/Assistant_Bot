@@ -185,7 +185,7 @@ final class RouterRig
             $this->catalog,
             $this->health,
             new Bot\OpenRouterClient($this->http->client, $this->settings, $now),
-            new Bot\PaidClient($this->http->client, $this->settings, $this->budget, $now, $sleep),
+            new Bot\PaidClient($this->http->client, $this->settings, $this->budget, $now, $sleep, $this->store),
             $this->log,
             $this->store,
             function ($text) {

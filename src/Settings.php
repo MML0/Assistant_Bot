@@ -27,7 +27,9 @@ final class Settings
                         'nvidia/nemotron-3-super-120b-a12b:free',
                         'poolside/laguna-s-2.1:free',
                     ],
-                    'paid_model' => 'gpt-4.1-nano',
+                    // Paid MetisAI models, in order: a model MetisAI reports as retired is skipped
+                    // for a day and the next one answers (gpt-4.1-nano was shut down on 2026-10-23).
+                    'paid_models' => ['gpt-5.4-nano', 'gpt-5-nano', 'gpt-4o-mini'],
                 ],
                 'smart' => [
                     'label' => '🧠 هوشمند',
@@ -37,7 +39,7 @@ final class Settings
                         'nvidia/nemotron-3.5-super-vl:free',
                         'poolside/laguna-s-2.1:free',
                     ],
-                    'paid_model' => 'gpt-4.1-mini',
+                    'paid_models' => ['gpt-5.4-mini', 'gpt-5-mini', 'gpt-4.1-mini', 'gpt-4o-mini'],
                 ],
                 'extra' => [
                     'label' => '🚀 فوق هوشمند',
@@ -47,7 +49,7 @@ final class Settings
                         'dots-studio/dots-3-note-preview:free',
                         'nvidia/nemotron-3-super-120b-a12b:free',
                     ],
-                    'paid_model' => 'gpt-4.1',
+                    'paid_models' => ['gpt-5.4', 'gpt-5', 'gpt-4.1', 'gpt-4o'],
                 ],
             ],
             // Free models of these tiers are tried next if a tier's own free models all fail.
@@ -98,19 +100,24 @@ final class Settings
 
             'paid' => [
                 'fallback_enabled'      => true,
-                'default_model'         => 'gpt-4.1-nano',
+                'default_model'         => 'gpt-5-nano',   // only when no tier is given
                 // Daily caps for MetisAI, 0 = no limit (the default: the old bot had none, and a cap
                 // stops every answer once it is reached). Set them to protect your balance.
                 'max_requests_per_day'  => 0,
                 'max_cost_per_day_usd'  => 0.0,
                 'max_output_tokens'     => 1000,
-                'max_attempts'          => 2,
+                'reasoning_max_output_tokens' => 3000,   // GPT-5 models: includes their hidden reasoning
+                'reasoning_effort'      => 'low',        // GPT-5 models: fast answers for a chat bot
+                'max_attempts'          => 3,            // paid calls per message (retries + next models)
                 'attempt_timeout'       => 25,
                 'connect_timeout'       => 5,
                 // Estimated USD per 1M tokens (MetisAI does not report cost); used for the budget only.
                 'price_per_million' => [
                     'default'      => ['input' => 2.0,  'output' => 8.0],
                     'gpt-4.1-nano' => ['input' => 0.1,  'output' => 0.4],
+                    'gpt-5-nano'   => ['input' => 0.05, 'output' => 0.4],
+                    'gpt-5-mini'   => ['input' => 0.25, 'output' => 2.0],
+                    'gpt-5'        => ['input' => 1.25, 'output' => 10.0],
                     'gpt-4.1-mini' => ['input' => 0.4,  'output' => 1.6],
                     'gpt-4o-mini'  => ['input' => 0.15, 'output' => 0.6],
                     'gpt-4.1'      => ['input' => 2.0,  'output' => 8.0],
@@ -187,6 +194,13 @@ final class Settings
         }
         if (!preg_match('~^[A-Za-z0-9_]{0,20}$~', $s['table_prefix'])) {
             $s['table_prefix'] = 'v2_';
+        }
+        // A paid_model set in config.php (the old single-model form) is tried first.
+        foreach ($s['tiers'] as $name => $tier) {
+            $s['tiers'][$name]['paid_models'] = array_values(array_unique(array_filter(
+                array_merge((array) ($tier['paid_model'] ?? []), (array) ($tier['paid_models'] ?? [])),
+                fn ($m) => is_string($m) && $m !== ''
+            ))) ?: [$s['paid']['default_model']];
         }
         if (!isset($s['tiers'][$s['default_tier']])) {
             $s['default_tier'] = array_key_first($s['tiers']);

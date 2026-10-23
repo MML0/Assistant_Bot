@@ -44,7 +44,7 @@ final class Services
             $this->catalog,
             $this->health,
             new OpenRouterClient($this->http, $this->settings),
-            new PaidClient($this->http, $this->settings, $this->budget),
+            new PaidClient($this->http, $this->settings, $this->budget, null, null, $this->store),
             $this->log,
             $this->store,
             $alert

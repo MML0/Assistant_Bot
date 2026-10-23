@@ -305,12 +305,51 @@ test('paid_only mode and explicit paid requests skip free models', function () u
     T::eq('gpt-4o', $rig2->http->bodies('paid.example')[0]['model']);
 });
 
-test('existing paid behaviour preserved: gpt-5 via responses endpoint', function () {
-    $rig = new RouterRig([], fn ($req) => json(200, ['output' => [['content' => [['text' => 'from responses']]]]]), ['routing' => ['mode' => 'paid_only']]);
+test('GPT-5 models: the real model via chat/completions, with max_completion_tokens and reasoning_effort', function () {
+    $rig = new RouterRig([], fn ($req) => json(200, ['choices' => [['message' => ['content' => 'from gpt-5']]]]), ['routing' => ['mode' => 'paid_only']]);
     $r = $rig->router->complete(convo(), ['paid_model' => 'gpt-5-mini']);
-    T::eq('from responses', $r['content']);
-    T::eq(1, $rig->http->count('paid.example/openai/v1/responses'));
-    T::eq(1000, $rig->http->bodies('responses')[0]['max_output_tokens'], 'output cap applied (1000 as before)');
+    T::eq('from gpt-5', $r['content']);
+    $body = $rig->http->bodies('paid.example/openai/v1/chat/completions')[0];
+    T::eq('gpt-5-mini', $body['model'], 'no longer swapped for gpt-4o');
+    T::eq(3000, $body['max_completion_tokens'] ?? null, 'max_completion_tokens (room for reasoning)');
+    T::eq('low', $body['reasoning_effort'] ?? null);
+    T::ok(!isset($body['max_tokens']), 'GPT-5 rejects max_tokens');
+    T::eq(0, $rig->http->count('/responses'));
+
+    $old = new RouterRig([], fn ($req) => json(200, ['choices' => [['message' => ['content' => 'ok']]]]), ['routing' => ['mode' => 'paid_only']]);
+    $old->router->complete(convo(), ['paid_model' => 'gpt-4o-mini']);
+    $b = $old->http->bodies('paid.example')[0];
+    T::ok(($b['max_tokens'] ?? null) === 1000 && !isset($b['reasoning_effort']), 'older models: max_tokens 1000 as before');
+});
+
+test('retired paid model (MetisAI 404 "deprecated") → next model at once, skipped for a day', function () {
+    $deprecated = fn ($m) => json(404, ['error' => ['message' => "The model `{$m}` has been deprecated, learn more here: https://platform.openai.com/docs/deprecations"]]);
+    $rig = new RouterRig([], fn ($req) => modelOf($req) === 'gpt-5.4-nano' ? $deprecated('gpt-5.4-nano') : json(200, ['choices' => [['message' => ['content' => 'answer from ' . modelOf($req)]]]]),
+        ['routing' => ['mode' => 'paid_only']]);
+    $r = $rig->router->complete(convo(), ['tier' => 'normal']);
+    T::ok($r['ok'] && $r['content'] === 'answer from gpt-5-nano', 'the next model of the tier answers');
+    T::eq(['gpt-5.4-nano', 'gpt-5-nano'], array_column($rig->http->bodies('paid.example'), 'model'), 'no waiting, no retry of the retired one');
+    $r2 = $rig->router->complete(convo('again'), ['tier' => 'normal']);
+    T::eq('gpt-5-nano', array_column($rig->http->bodies('paid.example'), 'model')[2] ?? null, 'next message: the retired model is not asked again');
+    $rig->t += 86400 + 1;
+    $rig->router->complete(convo('tomorrow'), ['tier' => 'normal']);
+    T::eq('gpt-5.4-nano', array_column($rig->http->bodies('paid.example'), 'model')[3] ?? null, 'tried again after a day');
+
+    $all = new RouterRig([], fn ($req) => $deprecated(modelOf($req)), ['routing' => ['mode' => 'paid_only']]);
+    $r3 = $all->router->complete(convo(), ['tier' => 'normal']);
+    T::ok(!$r3['ok'] && $r3['user_message'] === msg('unavailable'), 'all retired: friendly message');
+    T::eq(3, count($all->http->bodies('paid.example')), 'bounded: at most 3 paid calls per message');
+    $stats = Bot\RoutingLog::format($all->log->summary(1, $all->health->snapshot(), $all->budget->status(), $all->catalog->state()));
+    T::ok(str_contains($stats, 'invalid_model') && str_contains($stats, 'HTTP 404') && str_contains($stats, 'deprecated'), '/routingstats names the retired model');
+});
+
+test('config.php paid_model (old single form) is tried first, the defaults after it', function () {
+    $rig = new RouterRig([], fn ($req) => modelOf($req) === 'my-model' ? json(404, ['error' => ['message' => 'The model `my-model` does not exist']]) : json(200, ['choices' => [['message' => ['content' => 'ok']]]]),
+        ['routing' => ['mode' => 'paid_only'], 'tiers' => ['normal' => ['paid_model' => 'my-model']]]);
+    T::eq(['my-model', 'gpt-5.4-nano', 'gpt-5-nano', 'gpt-4o-mini'], $rig->settings['tiers']['normal']['paid_models']);
+    $r = $rig->router->complete(convo(), ['tier' => 'normal']);
+    T::ok($r['ok']);
+    T::eq(['my-model', 'gpt-5.4-nano'], array_column($rig->http->bodies('paid.example'), 'model'));
 });
 
 test('content refusal does not escalate to paid', function () use ($three) {
@@ -397,11 +436,11 @@ test('tier list order is used; paid fallback uses the tier paid model', function
     $r = $rig->router->complete(convo(), ['tier' => 'extra']);
     T::eq(['nvidia/nemotron-3-ultra-550b-a55b:free', 'thinkingmachines/inkling:free', 'dots-studio/dots-3-note-preview:free'], $rig->attemptedModels(), 'extra tier order, max 3 attempts');
     T::eq('paid', $r['tier']);
-    T::eq('gpt-4.1', $rig->http->bodies('paid.example')[0]['model'], 'extra → gpt-4.1');
+    T::eq('gpt-5.4', $rig->http->bodies('paid.example')[0]['model'], 'extra → gpt-5.4 first');
 
     $rig2 = new RouterRig([], fn ($req) => str_contains((string) $req->getUri(), 'paid.example') ? json(200, ['choices' => [['message' => ['content' => 'p']]]]) : orError(503, 'down'));
     $rig2->router->complete(convo(), ['tier' => 'normal']);
-    T::eq('gpt-4.1-nano', $rig2->http->bodies('paid.example')[0]['model'], 'normal → gpt-4.1-nano (as before for free users)');
+    T::eq('gpt-5.4-nano', $rig2->http->bodies('paid.example')[0]['model'], 'normal → gpt-5.4-nano (gpt-4.1-nano was shut down)');
 });
 
 test('tier falls back to lower-tier free models before paying', function () {
