@@ -86,8 +86,15 @@ test('cost_min mode never uses paid fallback', function () use ($three) {
     T::eq(0, $rig->paidCalls());
 });
 
-test('paid budget exhausted → stop and report, no paid request', function () use ($three) {
-    $rig = new RouterRig($three, fn ($req) => orError(503, 'down'), ['paid' => ['max_requests_per_day' => 0]]);
+test('paid budget: no cap by default (like the old bot); a configured cap that is used up stops paid', function () use ($three) {
+    $open = new RouterRig($three, fn ($req) => str_contains((string) $req->getUri(), 'paid.example') ? json(200, ['choices' => [['message' => ['content' => 'paid']]]]) : orError(503, 'down'));
+    for ($i = 0; $i < 3; $i++) {
+        T::ok($open->router->complete(convo())['ok'], 'default: paid always answers');
+    }
+    T::eq(0, $open->budget->status()['max_requests'], 'no daily request cap by default');
+
+    $rig = new RouterRig($three, fn ($req) => orError(503, 'down'), ['paid' => ['max_requests_per_day' => 1]]);
+    $rig->budget->reserve(0.0); // today's only paid request is already used
     $r = $rig->router->complete(convo());
     T::ok(!$r['ok']);
     T::eq(E::BUDGET, $r['error_class']);
@@ -187,19 +194,26 @@ test('image / tool requests only go to compatible models', function () {
     T::eq('no_eligible_free_model', $r2['fallback_reason']);
 });
 
-test('network timeout (possibly processed) → counted, cooled down, next model', function () use ($three) {
+test('free model timeout → answer with paid at once, free route paused (slow or filtered host)', function () use ($three) {
     $rig = new RouterRig($three, function ($req) {
+        if (str_contains((string) $req->getUri(), 'paid.example')) {
+            return json(200, ['choices' => [['message' => ['content' => 'paid']]]]);
+        }
         if (modelOf($req) === 'best/a:free') {
             return new ConnectException('cURL error 28: Operation timed out after 20000 milliseconds with 0 bytes received', $req);
         }
         return chatOk('ok', modelOf($req));
     });
     $r = $rig->router->complete(convo());
-    T::eq('good/b:free', $r['model']);
-    T::ok(!$rig->health->isAvailable('best/a:free'));
-    T::eq(2, $rig->health->localAccountCount(60), 'timed-out request still counted against local quota');
+    T::ok($r['ok'] && $r['tier'] === 'paid', 'answered by the paid model right after the timeout');
+    T::eq('free_timeout', $r['fallback_reason']);
+    T::eq(1, $rig->health->localAccountCount(60), 'only one free request: no second free wait');
+    T::ok(!$rig->health->isAvailable('best/a:free') && $rig->health->accountBlockedUntil() > 0, 'model cooled down and free route paused');
     $attempts = array_values(array_filter($rig->log->records(1), fn ($x) => $x['type'] === 'attempt'));
     T::eq(true, $attempts[0]['possibly_processed']);
+    $r2 = $rig->router->complete(convo());
+    T::ok($r2['ok'] && $r2['tier'] === 'paid' && str_starts_with((string) $r2['fallback_reason'], 'free_route_paused'), 'next message: paid directly, no waiting');
+    T::eq(1, $rig->health->localAccountCount(60), 'no free request while paused');
 });
 
 test('paid timeout after provider may have processed: budget charged, bounded retries', function () {

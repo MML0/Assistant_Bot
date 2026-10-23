@@ -62,7 +62,7 @@ final class Settings
                 'app_title'        => '',
                 'seed_models'      => [],
                 'connect_timeout'  => 4,
-                'attempt_timeout'  => 20,
+                'attempt_timeout'  => 15, // a free model slower than this: answer with the paid model
                 'max_tokens'       => 1500,
                 'reasoning_effort' => ['ordinary' => 'low', 'coding' => 'medium', 'hard' => 'medium'],
                 'provider_preferences' => null,
@@ -99,8 +99,10 @@ final class Settings
             'paid' => [
                 'fallback_enabled'      => true,
                 'default_model'         => 'gpt-4.1-nano',
-                'max_requests_per_day'  => 500,
-                'max_cost_per_day_usd'  => 3.0,
+                // Daily caps for MetisAI, 0 = no limit (the default: the old bot had none, and a cap
+                // stops every answer once it is reached). Set them to protect your balance.
+                'max_requests_per_day'  => 0,
+                'max_cost_per_day_usd'  => 0.0,
                 'max_output_tokens'     => 1000,
                 'max_attempts'          => 2,
                 'attempt_timeout'       => 25,

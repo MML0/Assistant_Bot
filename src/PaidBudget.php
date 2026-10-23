@@ -3,7 +3,8 @@
 namespace Bot;
 
 /**
- * Daily (UTC) spending guard for the paid API. A request first reserves its worst-case
+ * Optional daily (UTC) spending guard for the paid API (0 = no limit, the default, like the
+ * old bot that always answered with MetisAI). A request first reserves its worst-case
  * cost; once the answer arrives the reservation is settled to the measured/estimated cost.
  * Costs are estimates from the configured price table (the paid API reports no cost).
  */
@@ -39,11 +40,11 @@ final class PaidBudget
             if (($d['date'] ?? null) !== $today) {
                 $d = ['date' => $today, 'requests' => 0, 'cost' => 0.0, 'denied' => 0];
             }
-            if ($d['requests'] >= $cfg['max_requests_per_day']) {
+            if ($cfg['max_requests_per_day'] > 0 && $d['requests'] >= $cfg['max_requests_per_day']) {
                 $d['denied']++;
                 return [false, 'max_requests_per_day'];
             }
-            if ($d['cost'] + $worstCase > $cfg['max_cost_per_day_usd']) {
+            if ($cfg['max_cost_per_day_usd'] > 0 && $d['cost'] + $worstCase > $cfg['max_cost_per_day_usd']) {
                 $d['denied']++;
                 return [false, 'max_cost_per_day_usd'];
             }

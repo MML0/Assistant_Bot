@@ -147,6 +147,14 @@ final class Router
                         $fallbackReason = $err['class'];
                         break;
                     }
+                    if ($err['class'] === ErrorClassifier::TIMEOUT) {
+                        // Waiting for another free model would keep the user waiting again (a slow or
+                        // filtered route to OpenRouter times out for every model): answer with the paid
+                        // model now and skip the free route for a while.
+                        $this->health->pauseFreeAfterTimeout();
+                        $fallbackReason = 'free_timeout';
+                        break;
+                    }
                     if ($err['class'] === ErrorClassifier::INVALID_REQUEST && ++$invalidRequests >= 2) {
                         $fallbackReason = $err['class'];
                         break;

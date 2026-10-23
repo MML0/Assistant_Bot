@@ -57,6 +57,7 @@ The easiest setup to roll back is to upload into a **new folder**, for example `
    It creates `v2_users`, `v2_messages`, `v2_payments`, `v2_premium_entitlements` and `v2_voice_usage`. It copies all users (PRO status, expiry, ban, and model converted to a tier) and the whole chat history. Running it again is harmless.
 4. **Check.** Open `https://YOUR-HOST/gpt_bot_v2/check.php?pass=ADMIN_PASSWORD`. Every line should show ✔.
    - If **OpenRouter** shows ❌, your host can't reach openrouter.ai. The bot still works and simply answers with the paid MetisAI models.
+   - To answer **every** message with MetisAI, exactly like the old bot, add `'routing' => ['mode' => 'paid_only'],` to `config.php`.
    - Add `&chat=1` to send one tiny free test message. It never uses the paid API.
 5. **Switch the bot to the new folder:** `…/gpt_bot_v2/check.php?pass=ADMIN_PASSWORD&setwebhook=1`
 6. **Test in Bale:**
@@ -100,9 +101,10 @@ Each tier has an ordered list of free OpenRouter models in `src/Settings.php`. Y
 | 🚀 extra | nemotron-3-ultra-550b, inkling, dots-3-note-preview, nemotron-3-super-120b |
 
 - **Order of attempts.** The bot tries at most 3 free models per message, one at a time. If a tier's own models fail, it tries the free models of the lower tiers, then the tier's paid model.
+- **Slow or filtered OpenRouter.** If a free model doesn't answer within 15 seconds, the message is answered by MetisAI right away, and free models are skipped for 2 minutes (then 4, 8, 16, up to 30 minutes while it keeps happening). From a host where OpenRouter hangs, only one message now and then waits 15 seconds.
 - **Unavailable models.** A model that is rate-limited or down is skipped for a while, with no wasted requests. A model that OpenRouter no longer lists as free (retired or now paid) is skipped automatically.
 - **Who gets which tier.** Free users always use `normal`. Buying PRO moves a `normal` user to `smart`. PRO users can choose any tier with `/setmodel`.
-- **Paid budget.** The paid fallback is capped at `paid.max_requests_per_day` (500) and `paid.max_cost_per_day_usd` (about $3). Both are estimates, because MetisAI doesn't report costs.
+- **Paid budget.** No daily cap by default, like the old bot. You can set `'paid' => ['max_requests_per_day' => 2000, 'max_cost_per_day_usd' => 5]` in `config.php` to protect your MetisAI balance, but once a cap is reached the bot stops answering until 00:00 UTC (03:30 Tehran time) with «سقف استفاده امروز ربات پر شده است». Costs are estimates, because MetisAI doesn't report them.
 - **OpenRouter free limits.** These are shared by all free models: 20 requests a minute, and 50 a day until the account has bought 10 credits (1000 a day after that). When the limit is reached, the bot switches to paid until the next day (UTC).
 
 ## Payments

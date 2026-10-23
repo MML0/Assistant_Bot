@@ -45,6 +45,7 @@ return [
 
     // Optional tuning (defaults in src/Settings.php):
     // 'routing' => ['mode' => 'free_first'],     // free_first | quality_first | cost_min | paid_only
-    // 'paid' => ['fallback_enabled' => true, 'max_requests_per_day' => 500, 'max_cost_per_day_usd' => 3.0],
+    // 'routing' => ['mode' => 'paid_only'],     // every answer from MetisAI, exactly like the old bot
+    // 'paid' => ['max_requests_per_day' => 0, 'max_cost_per_day_usd' => 0],  // daily caps; 0 = no limit (default)
     // 'tiers' => ['extra' => ['free_models' => ['nvidia/nemotron-3-ultra-550b-a55b:free'], 'paid_model' => 'gpt-4.1']],
 ];

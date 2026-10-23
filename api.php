@@ -81,6 +81,8 @@ function sendToGPT(array $messages): string {
 function botAfterResponse(): void {
     if (function_exists('fastcgi_finish_request')) {
         fastcgi_finish_request();
+    } elseif (function_exists('litespeed_finish_request')) {
+        litespeed_finish_request(); // LiteSpeed hosts: release Bale's connection the same way
     }
     try {
         botServices()->catalog->refreshIfDue();

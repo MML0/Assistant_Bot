@@ -56,6 +56,7 @@ final class ModelHealth
             $m['recent'] = array_slice($m['recent'], -self::RECENT);
             $d['models'][$model] = $m;
             $d['account']['network_failures'] = 0;
+            $d['account']['timeout_pauses'] = 0;
             self::applyRateInfo($d, $rate, $now);
         }, ['models' => [], 'account' => []]);
     }
@@ -130,6 +131,24 @@ final class ModelHealth
                 $d['account']['reported_remaining'] = $err['remaining'];
                 $d['account']['reported_at'] = $now;
             }
+        }, ['models' => [], 'account' => []]);
+    }
+
+    /**
+     * A free model did not answer in time. From a host where OpenRouter is slow or filtered the
+     * next one will not either, so every free model is paused: 2, 4, 8, 16, then 30 minutes.
+     * The first success resets it.
+     */
+    public function pauseFreeAfterTimeout(): float
+    {
+        $now = ($this->now)();
+        return (float) $this->store->update(self::FILE, function (&$d) use ($now) {
+            $n = (int) ($d['account']['timeout_pauses'] ?? 0);
+            $until = $now + min(1800, 120 * 2 ** min(4, $n));
+            $d['account']['timeout_pauses'] = $n + 1;
+            $d['account']['free_cooldown_until'] = max($d['account']['free_cooldown_until'] ?? 0, $until);
+            $d['account']['free_cooldown_reason'] = ErrorClassifier::TIMEOUT;
+            return $until;
         }, ['models' => [], 'account' => []]);
     }
 

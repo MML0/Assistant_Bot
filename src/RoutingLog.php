@@ -138,8 +138,8 @@ final class RoutingLog
             "📊 Routing ({$s['days']}d): {$s['requests']} requests",
             "free {$s['free_pct']}% · paid {$s['paid_pct']}% · failed {$s['failed_pct']}% · fallback {$s['fallback_pct']}%",
             "Paid est. cost: \${$s['estimated_paid_cost_usd']} · daily-quota hits: {$s['daily_quota_hits']}",
-            'Today paid: ' . ($s['paid_budget_today']['requests'] ?? 0) . '/' . ($s['paid_budget_today']['max_requests'] ?? '?')
-                . ' req, $' . round($s['paid_budget_today']['cost'] ?? 0, 4) . '/$' . ($s['paid_budget_today']['max_cost'] ?? '?'),
+            'Today paid: ' . ($s['paid_budget_today']['requests'] ?? 0) . '/' . (($s['paid_budget_today']['max_requests'] ?? 0) ?: 'no limit')
+                . ' req, $' . round($s['paid_budget_today']['cost'] ?? 0, 4) . '/' . (($s['paid_budget_today']['max_cost'] ?? 0) ? '$' . $s['paid_budget_today']['max_cost'] : 'no limit'),
             'Catalog: ' . $s['catalog']['models'] . ' free models, refreshed ' . $s['catalog']['fetched_at']
                 . ($s['catalog']['last_error'] ? ' (last error: ' . $s['catalog']['last_error'] . ')' : ''),
         ];
