@@ -1,0 +1,8 @@
+config.php
+.vscode
+.vscode/*
+.vscode/sftp.json
+vendor/*
+GPT_BOTble.zip
+GPT_BOTble.rar
+ftp.php
