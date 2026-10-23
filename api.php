@@ -4,6 +4,7 @@ $config = require __DIR__ . '/config.php';
 require __DIR__ . '/vendor/autoload.php';
 require __DIR__ . '/commands.php';
 require __DIR__ . '/buttons.php';
+require __DIR__ . '/src/bootstrap.php';
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
@@ -34,86 +35,56 @@ function getUserModel($chatId, $default = 'gpt-4.1-mini') {
     return $model ?: $default; // fallback if null
 }
 
-function sendToGPT(array $messages): string {
-    global $config, $chatId;
-
-    $apiKey  = $config['gpt']['api_key'];
-    $baseUrl = rtrim($config['gpt']['base_url'], '/');
-    $adminChatId = $config['telegram']['admin_chatid'];
-    $model = getUserModel($chatId);
-
-    $client = new Client([
-        'base_uri' => $baseUrl . '/',
-        'timeout'  => 5,
-    ]);
-
-    $maxAttempts = 3;
-    $errors = [];
-
-    // 🔍 Detect GPT-5 family
-    $isGpt5 = str_starts_with($model, 'gpt-5');
-
-    for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
-        try {
-
-            // ================= GPT-5 =================
-            if ($isGpt5) {
-
-                $response = $client->post('responses', [
-                    'headers' => [
-                        'Authorization' => "Bearer {$apiKey}",
-                        'Content-Type'  => 'application/json',
-                    ],
-                    'json' => [
-                        'model' => 'gpt-4o',
-                        'input' => $messages,
-                    ],
-                ]);
-
-                $data = json_decode((string) $response->getBody(), true);
-
-                if (!empty($data['output'][0]['content'][0]['text'])) {
-                    return $data['output'][0]['content'][0]['text'];
-                }
-
-            // ================= GPT-4 / 4o / 4.1 =================
-            } else {
-
-                $response = $client->post('chat/completions', [
-                    'headers' => [
-                        'Authorization' => "Bearer {$apiKey}",
-                        'Content-Type'  => 'application/json',
-                    ],
-                    'json' => [
-                        'model'      => $model,
-                        'messages'   => $messages,
-                        'max_tokens' => 700,
-                    ],
-                ]);
-
-                $data = json_decode((string) $response->getBody(), true);
-
-                if (!empty($data['choices'][0]['message']['content'])) {
-                    return $data['choices'][0]['message']['content'];
-                }
-            }
-
-            $errors[] = "Attempt {$attempt}: No content returned.";
-
-        } catch (\Throwable $e) {
-            $errors[] = "Attempt {$attempt}: " . $e->getMessage();
-        }
-
-        usleep(500000 * $attempt);
+// Free-first routing (OpenRouter free models → existing paid API by policy). See src/Router.php.
+function botServices(): Bot\Services {
+    static $services = null;
+    global $config;
+    if ($services === null) {
+        $adminChatId = $config['telegram']['admin_chatid'];
+        $services = new Bot\Services($config, null, function (string $text) use ($adminChatId) {
+            sendTelegramMessage($adminChatId, $text, '');
+        });
     }
+    return $services;
+}
 
-    sendTelegramMessage($adminChatId, "🚨 GPT Error Log:\n" . implode("\n\n", $errors));
-    return "⚠️ GPT is temporarily unavailable. Please try again.";
+function sendToGPTResult(array $messages, string $purpose = 'chat'): array {
+    global $chatId, $isPro;
+
+    $settings = botServices()->settings;
+    $default  = $settings['paid']['default_model'];
+    $model    = getUserModel($chatId, $default);
+
+    // A PRO user's own /setmodel choice may be treated as an explicit paid request (off by default).
+    $explicitPaid = $settings['routing']['pro_model_choice_is_explicit_paid']
+        && !empty($isPro) && $model !== $default;
+
+    return botServices()->router->complete($messages, [
+        'purpose'       => $purpose,
+        'paid_model'    => $model,
+        'explicit_paid' => $explicitPaid,
+    ]);
+}
+
+function sendToGPT(array $messages, string $purpose = 'chat'): string {
+    return sendToGPTResult($messages, $purpose)['user_message'];
+}
+
+// Runs after the user already has the reply: refresh the free-model catalogue if it is stale.
+function botAfterResponse(): void {
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+    }
+    try {
+        botServices()->catalog->refreshIfDue();
+    } catch (\Throwable $e) {
+        error_log('[router] catalogue refresh failed: ' . Bot\Redactor::redact($e->getMessage(), 200));
+    }
 }
 
 
 // Summarize the current history using GPT
-function summarize_history(array $messageHistory): string{
+function summarize_history(array $messageHistory): ?string{
     global $config , $userId , $chatId , $username , $lastName,$firstName;
 
     // Build a single prompt like in your Python version
@@ -127,7 +98,11 @@ function summarize_history(array $messageHistory): string{
         ['role' => 'user',   'content' => $prompt],
     ];
 
-    $summery = sendToGPT($messages);
+    $result = sendToGPTResult($messages, 'summary');
+    if (!$result['ok']) {
+        return null; // keep the full history rather than storing an error as the summary
+    }
+    $summery = $result['content'];
 
     $logText = "New summary \n"
     . "User ID: {$userId} "
@@ -216,11 +191,16 @@ function makeUserPro(?int $userId = null, $chatId = null, ?string $expireAt = nu
 }
 
 // ----------------- TELEGRAM FUNCTION -----------------
+function telegramApiBase(): string {
+    global $config;
+    return rtrim($config['telegram']['api_base'] ?? 'https://api.telegram.org', '/');
+}
+
 function sendTelegramMessage($chatId, $text, $parseMode = null): void {
     global $config;
 
     $token = $config['telegram']['bot_token'];
-    $url   = "https://api.telegram.org/bot{$token}/sendMessage";
+    $url   = telegramApiBase() . "/bot{$token}/sendMessage";
 
     // ---------------- AUTO MARKDOWN DETECT ----------------
     if ($parseMode === null) {
@@ -266,7 +246,7 @@ function sendTelegramTyping($chatId): void {
     global $config;
 
     $token = $config['telegram']['bot_token'];
-    $url   = "https://api.telegram.org/bot{$token}/sendChatAction";
+    $url   = telegramApiBase() . "/bot{$token}/sendChatAction";
 
     $data = [
         'chat_id' => $chatId,
@@ -298,6 +278,13 @@ try {
 
 // ----------------- GET TELEGRAM UPDATE -----------------
 $update = json_decode(file_get_contents('php://input'), true);
+if (!is_array($update)) {
+    exit;
+}
+// Telegram re-delivers updates when the webhook is slow; never process (and pay for) one twice.
+if (isset($update['update_id']) && !(new Bot\UpdateDeduper(botServices()->store))->firstSeen('u:' . $update['update_id'])) {
+    exit;
+}
 // Handle inline button presses
 if (isset($update['callback_query'])) {
     if (handleCallback($update)) {
@@ -326,7 +313,7 @@ $systemPrompt = <<<EOT
 You are a helpful AI assistant in telegram chat no wierd markup text. Answer clearly and concisely.my name is $firstName $lastName say hi 
 EOT;
 
-if (!$userText) {
+if (!$userText && !Bot\VoiceTranscriber::isAudioMessage($update['message'])) {
     exit;
 }
 
@@ -366,6 +353,14 @@ if ($isGroup) {
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
 }
 
+// ----------------- VOICE → TEXT (paid premium only, checked server-side) -----------------
+if (Bot\VoiceTranscriber::isAudioMessage($update['message'])) {
+    $voice = botServices()->voice($db, $config['telegram']['bot_token'], function ($to, $text) {
+        sendTelegramMessage($to, $text, '');
+    });
+    $voice->handle($update['message'], $update['update_id'] ?? null, isset($user['id']) ? (int) $user['id'] : null);
+    exit;
+}
 
 // Check if message is a command
 if (handleCommand($chatId, $userText)) {
@@ -537,10 +532,12 @@ $flatHistory[] = $userText;
 // AUTO-SUMMARIZE IF HISTORY > HISTORY_LIMIT
 // ----------------------------------------------------
 
+$summary = null;
 if (count($flatHistory) > HISTORY_LIMIT) {
-
     $summary = summarize_history($flatHistory);
+}
 
+if ($summary !== null) {
     // Save summary marker in DB
     $stmt = $db->prepare("INSERT INTO messages (user_id, chat_memory_id, message, type) VALUES (?, ?, ?, 'SUMMARY')");
     $stmt->execute([$userId, $memoryOwnerId, $summary]);
@@ -571,17 +568,23 @@ sendTelegramMessage($adminChatId, "{$firstName} {$lastName} @{$username} count: 
 
 
 // ----------------- SEND TO GPT -----------------
-$gptReply = sendToGPT($messagesForGPT);
+$gptResult = sendToGPTResult($messagesForGPT);
+$gptReply  = $gptResult['user_message'];
 
 // ----------------- SAVE MESSAGES -----------------
 $stmt = $db->prepare("INSERT INTO messages (user_id, chat_memory_id, message, type) VALUES (?, ?, ?, 'USER')");
 $stmt->execute([$userId, $memoryOwnerId, $userText]);
 
-$stmt = $db->prepare("INSERT INTO messages (user_id, chat_memory_id, message, type) VALUES (?, ?, ?, 'AI')");
-$stmt->execute([$userId, $memoryOwnerId, $gptReply]);
+// Error notices are not part of the conversation; don't feed them back as history.
+if ($gptResult['ok']) {
+    $stmt = $db->prepare("INSERT INTO messages (user_id, chat_memory_id, message, type) VALUES (?, ?, ?, 'AI')");
+    $stmt->execute([$userId, $memoryOwnerId, $gptReply]);
+}
 
 
 // ----------------- SEND REPLY BACK TO TELEGRAM -----------------
 sendTelegramMessage($chatId, $gptReply);
+
+botAfterResponse();
 
 ?>

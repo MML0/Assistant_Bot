@@ -187,5 +187,85 @@ if ($lower === '/getpro') {
 
     return true;
 }
+
+// ----- /premiumstatus [telegram_user_id] -----
+if (preg_match('~^/premiumstatus(?:\s+(\d+))?$~', $lower, $m)) {
+    global $update;
+    $senderId = (int) $update['message']['from']['id'];
+    $target   = $senderId;
+    if (!empty($m[1])) {
+        if (!isTrustedAdmin()) {
+            return true; // only the admin may look up other users
+        }
+        $target = (int) $m[1];
+    }
+    try {
+        $expiry = (new Bot\Entitlements($db))->activeExpiry($target);
+    } catch (\Throwable $e) {
+        sendTelegramMessage($chatId, "Premium status is unavailable right now.", '');
+        return true;
+    }
+    sendTelegramMessage($chatId, $expiry
+        ? "💎 Paid premium (voice-to-text) active until {$expiry}."
+        : "No active paid premium. Voice-to-text requires paid premium.", '');
+    return true;
+}
+
+// ----- admin: /grantpremium <telegram_user_id> <days> [payment_ref] -----
+// Use only after verifying the payment yourself; this is the ONLY way premium is granted.
+if (preg_match('~^/grantpremium\s+(\d+)\s+(\d+)(?:\s+(\S{1,100}))?$~', $lower, $m)) {
+    if (!isTrustedAdmin()) {
+        return false; // behave like an unknown message for everyone else
+    }
+    $days = (int) $m[2];
+    if ($days < 1 || $days > 3650) {
+        sendTelegramMessage($chatId, "Days must be between 1 and 3650.", '');
+        return true;
+    }
+    global $update;
+    try {
+        $expiry = (new Bot\Entitlements($db))->grant((int) $m[1], $days, (int) $update['message']['from']['id'], $m[3] ?? null);
+    } catch (\Throwable $e) {
+        sendTelegramMessage($chatId, "❌ Grant failed. Did you run migrate_upgrade.php?", '');
+        return true;
+    }
+    makeUserPro(null, (int) $m[1], $expiry); // paid premium also includes the normal PRO benefits
+    sendTelegramMessage($chatId, "✅ Paid premium for {$m[1]} active until {$expiry}.", '');
+    return true;
+}
+
+// ----- admin: /revokepremium <telegram_user_id> -----
+if (preg_match('~^/revokepremium\s+(\d+)$~', $lower, $m)) {
+    if (!isTrustedAdmin()) {
+        return false;
+    }
+    try {
+        $n = (new Bot\Entitlements($db))->revoke((int) $m[1]);
+    } catch (\Throwable $e) {
+        sendTelegramMessage($chatId, "❌ Revoke failed. Did you run migrate_upgrade.php?", '');
+        return true;
+    }
+    sendTelegramMessage($chatId, "✅ Cancelled {$n} premium entitlement(s) for {$m[1]}.", '');
+    return true;
+}
+
+// ----- admin: /routingstats [days] -----
+if (preg_match('~^/routingstats(?:\s+(\d{1,2}))?$~', $lower, $m)) {
+    if (!isTrustedAdmin()) {
+        return false;
+    }
+    sendTelegramMessage($chatId, botServices()->statsText(max(1, (int) ($m[1] ?? 1))), '');
+    return true;
+}
     return false; // no command matched
+}
+
+// The admin is identified by the sender's Telegram id in a private chat, never by chat
+// membership, group admin rights or anything the user can type.
+function isTrustedAdmin(): bool {
+    global $update, $config;
+    $from = $update['message']['from']['id'] ?? null;
+    $type = $update['message']['chat']['type'] ?? '';
+    return $from !== null && $type === 'private'
+        && (string) $from === (string) $config['telegram']['admin_chatid'];
 }

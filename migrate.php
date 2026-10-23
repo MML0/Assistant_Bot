@@ -24,6 +24,8 @@ try {
     $db->exec("SET FOREIGN_KEY_CHECKS = 0;");
 
     $db->exec("DROP TABLE IF EXISTS messages;");
+    $db->exec("DROP TABLE IF EXISTS voice_usage;");
+    $db->exec("DROP TABLE IF EXISTS premium_entitlements;");
     $db->exec("DROP TABLE IF EXISTS users;");
 
     $db->exec("SET FOREIGN_KEY_CHECKS = 1;");
@@ -57,6 +59,7 @@ try {
     CREATE TABLE messages (
         id INT AUTO_INCREMENT PRIMARY KEY,
         user_id INT NOT NULL,
+        chat_memory_id BIGINT NULL,
         message TEXT NOT NULL,
         type ENUM('USER','AI','SUMMARY') NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -66,6 +69,13 @@ try {
 
     $db->exec($sql_messages);
     echo "Messages table created.\n";
+
+    // Paid premium entitlements + voice usage metering (also: migrate_upgrade.php)
+    require_once __DIR__ . '/src/Entitlements.php';
+    foreach (Bot\Entitlements::mysqlSchema() as $sql) {
+        $db->exec($sql);
+    }
+    echo "Premium entitlement and voice usage tables created.\n";
 
     echo "Fresh migration completed successfully!";
 } catch (PDOException $e) {

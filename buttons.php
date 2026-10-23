@@ -5,7 +5,7 @@ function sendButtons($chatId, $text, $buttons, $parseMode = null) {
     global $config;
 
     $token = $config['telegram']['bot_token'];
-    $url   = "https://api.telegram.org/bot{$token}/sendMessage";
+    $url   = telegramApiBase() . "/bot{$token}/sendMessage";
 
     $payload = [
         'chat_id' => $chatId,
@@ -82,7 +82,7 @@ function answerCallback($callbackId, $text = "") {
     global $config;
 
     $token = $config['telegram']['bot_token'];
-    $url   = "https://api.telegram.org/bot{$token}/answerCallbackQuery";
+    $url   = telegramApiBase() . "/bot{$token}/answerCallbackQuery";
 
     $payload = [
         'callback_query_id' => $callbackId,
