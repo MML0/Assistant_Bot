@@ -29,6 +29,12 @@ return [
     ],
 
     // ---------------- new ----------------
+    // GapGPT: the fallback when MetisAI fails (text, voice, images).
+    'gap_gpt' => [
+        'api_key' => 'YOUR_GAPGPT_KEY',
+        'base_url' => 'https://api.gapgpt.app/v1',
+    ],
+
     'payment' => [
         'provider_token' => 'WALLET-XXXXXXXX',   // Bale wallet token (was hard-coded in buttons.php)
     ],

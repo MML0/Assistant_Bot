@@ -18,3 +18,6 @@ require_once __DIR__ . '/UpdateDeduper.php';
 require_once __DIR__ . '/Entitlements.php';
 require_once __DIR__ . '/VoiceTranscriber.php';
 require_once __DIR__ . '/Services.php';
+require_once __DIR__ . '/Plans.php';
+require_once __DIR__ . '/Media.php';
+require_once __DIR__ . '/AdminSettings.php';

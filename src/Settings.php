@@ -17,6 +17,49 @@ final class Settings
             'storage_dir' => dirname(__DIR__) . '/storage',
             'table_prefix' => 'v2_',
 
+            // Subscription plans sold by /buypro. Turn images_enabled on once image features exist.
+            // Provider order for each action: the first one is tried first, any failure moves to the next.
+            'media' => [
+                'images_enabled' => true,
+                'vision_enabled' => true,
+                'voice_enabled'  => true,
+                'order' => [
+                    'text'   => ['metis', 'gapgpt'],
+                    'voice'  => ['metis', 'gapgpt'],
+                    'image'  => ['metis', 'gapgpt'],
+                    'vision' => ['metis', 'gapgpt'],
+                ],
+                'models' => [
+                    'voice'  => ['metis' => 'gpt-transcribe', 'gapgpt' => 'whisper-1'],
+                    'image'  => ['metis' => 'gpt-image-1.5', 'gapgpt' => 'gpt-image-2'],
+                    'vision' => ['metis' => 'gpt-4o-mini', 'gapgpt' => 'gpt-4o-mini'],
+                ],
+                'image' => ['size' => '1024x1024', 'quality' => 'low', 'timeout' => 120],
+            ],
+            'features' => ['secret_pro_code' => true],
+            // System prompts, edited in the dashboard. Chat placeholders: {date} {time} {plan} {limit} {first_name} {last_name} {username}
+            'prompts' => [
+                'chat' => <<<'PROMPT'
+You are a helpful AI assistant in telegram chat no wierd markup text. Answer clearly and concisely.
+current iran Time miladi date: {date} {time} 
+{plan}
+{limit}
+ نام کاربر : " {first_name} {last_name} " usernam : " {username} 
+ say hi to them by name"
+PROMPT,
+                'summary' => 'You are a helpful assistant that summarizes conversations.',
+                'vision' => 'به زبان فارسی و روشن پاسخ بده، مگر این که کاربر زبان دیگری بخواهد. markup عجیب استفاده نکن.',
+            ],
+            // Without a plan: PRO earned by inviting people (or the secret code). A small allowance, well under paid plans.
+            'usd_toman' => 270510, // only for the dashboard's profit estimate
+            'free_limits' => ['chat_per_day' => 5, 'voice_minutes_per_day' => 0, 'image_per_day' => 0, 'image_per_month' => 0, 'vision_per_day' => 0, 'tiers' => ['normal']],
+            'pro_limits'  => ['chat_per_day' => 15, 'voice_minutes_per_day' => 3, 'voice_per_week' => 1, 'image_per_day' => 1, 'image_per_week' => 1, 'image_per_month' => 0, 'vision_per_day' => 0, 'tiers' => ['normal']],
+            'plans' => [
+                'basic' => ['title' => 'پلن پایه', 'price_toman' => 89000, 'days' => 30, 'chat_per_day' => 30, 'voice_minutes_per_day' => 30, 'image_per_day' => 0, 'image_per_month' => 0, 'vision_per_day' => 0, 'enabled' => true, 'tiers' => ['normal', 'smart', 'extra']],
+                'advanced' => ['title' => 'پلن حرفه‌ای', 'price_toman' => 149000, 'days' => 30, 'chat_per_day' => 50, 'voice_minutes_per_day' => 30, 'image_per_day' => 5, 'image_per_month' => 60, 'vision_per_day' => 10, 'enabled' => true, 'tiers' => ['normal', 'smart', 'extra']],
+                'ultimate' => ['title' => 'پلن پرو', 'price_toman' => 299000, 'days' => 30, 'chat_per_day' => 250, 'voice_minutes_per_day' => 30, 'image_per_day' => 15, 'image_per_month' => 200, 'vision_per_day' => 30, 'enabled' => true, 'tiers' => ['normal', 'smart', 'extra']],
+            ],
+
             // Three tiers shown to users. Free models are tried in this order (validated
             // against OpenRouter's live list once discovery has run), then the tier's paid model.
             'tiers' => [
@@ -30,6 +73,7 @@ final class Settings
                     // Paid MetisAI models, in order: a model MetisAI reports as retired is skipped
                     // for a day and the next one answers (gpt-4.1-nano was shut down on 2026-10-23).
                     'paid_models' => ['gpt-5.4-nano', 'gpt-5-nano', 'gpt-4o-mini'],
+                    'gapgpt_models' => ['gpt-5.4-nano', 'gpt-5-nano', 'gpt-4o-mini'],
                 ],
                 'smart' => [
                     'label' => '🧠 هوشمند',
@@ -40,6 +84,7 @@ final class Settings
                         'poolside/laguna-s-2.1:free',
                     ],
                     'paid_models' => ['gpt-5.4-mini', 'gpt-5-mini', 'gpt-4.1-mini', 'gpt-4o-mini'],
+                    'gapgpt_models' => ['gpt-5.4-mini', 'gpt-5-mini', 'gpt-4.1-mini', 'gpt-4o-mini'],
                 ],
                 'extra' => [
                     'label' => '🚀 فوق هوشمند',
@@ -50,6 +95,7 @@ final class Settings
                         'nvidia/nemotron-3-super-120b-a12b:free',
                     ],
                     'paid_models' => ['gpt-5.4', 'gpt-5', 'gpt-4.1', 'gpt-4o'],
+                    'gapgpt_models' => ['gpt-5.4', 'gpt-5', 'gpt-4.1', 'gpt-4o'],
                 ],
             ],
             // Free models of these tiers are tried next if a tier's own free models all fail.
@@ -136,7 +182,7 @@ final class Settings
                 'base_url'               => 'https://api.gapgpt.app/v1',
                 'api_key'                => '',
                 'model'                  => 'gapgpt/whisper-1',
-                'language'               => null,
+                'language'               => 'fa',
                 'max_duration_seconds'   => 300,
                 'max_file_bytes'         => 10 * 1024 * 1024,
                 'allowed_mime_types'     => ['audio/ogg', 'audio/opus', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a', 'audio/m4a', 'audio/aac', 'audio/wav', 'audio/x-wav', 'audio/webm'],
@@ -189,6 +235,26 @@ final class Settings
             $s['paid']['fallback_enabled'] = filter_var($flag, FILTER_VALIDATE_BOOLEAN);
         }
 
+        // Dashboard changes go over config.php. Whole sets are replaced so deleted plans stay deleted.
+        $overlay = self::readOverlay($s['storage_dir']);
+        foreach (['plans', 'tiers'] as $whole) {
+            if (isset($overlay[$whole])) {
+                $s[$whole] = $overlay[$whole];
+                unset($overlay[$whole]);
+            }
+        }
+        $s = self::mergeDeep($s, $overlay);
+
+        // Providers keep their keys in config.php. Without a gap_gpt block the bot has one provider.
+        $s['providers'] = [];
+        if (!empty($gpt['api_key']) && !empty($gpt['base_url'])) {
+            $s['providers']['metis'] = ['base_url' => $gpt['base_url'], 'api_key' => $gpt['api_key']];
+        }
+        if (!empty($config['gap_gpt']['api_key'])) {
+            $s['providers']['gapgpt'] = ['base_url' => $config['gap_gpt']['base_url'] ?? 'https://api.gapgpt.app/v1', 'api_key' => $config['gap_gpt']['api_key']];
+            $s['transcription']['providers'] = self::mediaChain($s, 'voice');
+        }
+
         if (!in_array($s['routing']['mode'], ['free_first', 'quality_first', 'cost_min', 'paid_only'], true)) {
             $s['routing']['mode'] = 'free_first';
         }
@@ -209,6 +275,33 @@ final class Settings
     }
 
     /** Arrays with string keys merge recursively; lists and scalars are replaced. */
+    private static function readOverlay(string $dir): array
+    {
+        // The offline tests must not depend on the live dashboard settings of this host.
+        if (defined('BOT_TESTING') && $dir === dirname(__DIR__) . '/storage') {
+            return [];
+        }
+        $path = $dir . '/' . AdminSettings::FILE;
+        $data = is_file($path) ? json_decode((string) @file_get_contents($path), true) : null;
+        return is_array($data) ? $data : [];
+    }
+
+    /**
+     * The providers to try for an action, in order, with their model.
+     * @return array<int,array{name:string,base_url:string,api_key:string,model:string}>
+     */
+    public static function mediaChain(array $s, string $action, ?string $only = null): array
+    {
+        $chain = [];
+        foreach ($only !== null ? [$only] : (array) ($s['media']['order'][$action] ?? []) as $name) {
+            $model = $s['media']['models'][$action][$name] ?? '';
+            if (isset($s['providers'][$name]) && $model !== '') {
+                $chain[] = ['name' => $name, 'model' => $model] + $s['providers'][$name];
+            }
+        }
+        return $chain;
+    }
+
     public static function mergeDeep(array $base, array $over): array
     {
         foreach ($over as $k => $v) {

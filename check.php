@@ -118,7 +118,7 @@ try {
 }
 
 echo "\n== Voice-to-text (GapGPT)\n";
-$t = $s['transcription'];
+$t = $s['transcription']['providers'][0] ?? $s['transcription'];
 if ($ok($t['api_key'] !== '', 'API key configured', "model {$t['model']}")) {
     try {
         $res = $http->get(rtrim($t['base_url'], '/') . '/models', ['headers' => ['Authorization' => 'Bearer ' . $t['api_key']]]);

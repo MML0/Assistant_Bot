@@ -23,10 +23,12 @@ final class Services
     public function __construct(array $config, ?ClientInterface $http = null, ?callable $alert = null)
     {
         $this->settings = Settings::fromConfig($config);
+        $gapKey = $config['gap_gpt']['api_key'] ?? null;
         Redactor::registerSecrets([
             $this->settings['openrouter']['api_key'],
             $this->settings['transcription']['api_key'],
             $config['gpt']['api_key'] ?? null,
+            $gapKey,
             $config['telegram']['bot_token'] ?? null,
             $config['database']['password'] ?? null,
             $config['payment']['provider_token'] ?? null,
@@ -39,16 +41,29 @@ final class Services
         $this->catalog = new ModelCatalog($this->store, $this->http, $this->settings, $this->health);
         $this->budget  = new PaidBudget($this->store, $this->settings);
         $this->log     = new RoutingLog($this->store);
+        // Text: the providers in the dashboard's order. Without a gap_gpt block, MetisAI alone.
+        $order = $gapKey ? array_values(array_filter((array) $this->settings['media']['order']['text'], fn ($p) => isset($this->settings['providers'][$p]))) : [];
         $this->router  = new Router(
             $this->settings,
             $this->catalog,
             $this->health,
             new OpenRouterClient($this->http, $this->settings),
-            new PaidClient($this->http, $this->settings, $this->budget, null, null, $this->store),
+            $this->textClient($order[0] ?? 'metis'),
             $this->log,
             $this->store,
-            $alert
+            $alert,
+            null,
+            isset($order[1]) ? $this->textClient($order[1]) : null
         );
+    }
+
+    public function textClient(string $provider): PaidClient
+    {
+        $settings = $this->settings;
+        if (isset($settings['providers'][$provider])) {
+            $settings['gpt'] = $settings['providers'][$provider] + ($settings['gpt'] ?? []);
+        }
+        return new PaidClient($this->http, $settings, $this->budget, null, null, $this->store, $provider);
     }
 
     public function entitlements(PDO $db): Entitlements

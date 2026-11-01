@@ -160,7 +160,7 @@ test('oversized, too long and malformed audio are rejected safely', function () 
     $rig = new VoiceRig();
     $rig->ent->grant(PREMIUM_ID, 30, 999);
     T::eq('too_large', $rig->voice->handle($rig->msg(PREMIUM_ID, ['file_size' => 50 * 1024 * 1024]), 20));
-    T::eq('too_long', $rig->voice->handle($rig->msg(PREMIUM_ID, ['duration' => 3600]), 21));
+    T::eq('too_long', $rig->voice->handle($rig->msg(PREMIUM_ID, ['duration' => 3600, 'file_size' => 7200000]), 21));
     T::eq('invalid_format', $rig->voice->handle($rig->msg(PREMIUM_ID, ['mime_type' => 'application/x-msdownload']), 22));
     T::eq(0, count($rig->http->history), 'rejected from metadata before download');
 
@@ -196,8 +196,8 @@ test('per-user hourly rate limit and daily minutes quota', function () {
 
     $q = new VoiceRig(['transcription' => ['max_minutes_per_day' => 1]]);
     $q->ent->grant(PREMIUM_ID, 30, 999);
-    T::eq('transcribed', $q->voice->handle($q->msg(PREMIUM_ID, ['duration' => 50]), 43));
-    T::eq('quota_exceeded', $q->voice->handle($q->msg(PREMIUM_ID, ['duration' => 20]), 44));
+    T::eq('transcribed', $q->voice->handle($q->msg(PREMIUM_ID, ['duration' => 50, 'file_size' => 100000]), 43));
+    T::eq('quota_exceeded', $q->voice->handle($q->msg(PREMIUM_ID, ['duration' => 20, 'file_size' => 40000]), 44));
 });
 
 test('concurrent request from the same user is refused', function () {
@@ -230,8 +230,8 @@ test('groups: denied silently by default', function () {
 test('usage cost can be monitored per user', function () {
     $rig = new VoiceRig();
     $rig->ent->grant(PREMIUM_ID, 30, 999);
-    $rig->voice->handle($rig->msg(PREMIUM_ID, ['duration' => 60]), 80);
-    $rig->voice->handle($rig->msg(PREMIUM_ID, ['duration' => 30]), 81);
+    $rig->voice->handle($rig->msg(PREMIUM_ID, ['duration' => 60, 'file_size' => 120000]), 80);
+    $rig->voice->handle($rig->msg(PREMIUM_ID, ['duration' => 30, 'file_size' => 60000]), 81);
     $sum = (float) $rig->db->query('SELECT SUM(estimated_cost_usd) FROM v2_voice_usage WHERE telegram_user_id = ' . PREMIUM_ID)->fetchColumn();
     T::ok(abs($sum - 0.009) < 1e-6, 'sum of per-minute estimates (0.006 + 0.003)');
 });
@@ -262,6 +262,36 @@ test('allow_referral_pro switch: off = paid only, on = any active PRO', function
     T::eq('transcribed', $on->voice->handle($on->msg(FREE_ID), 92), 'referral PRO allowed when switched on');
     $on->proUsers[FREE_ID] = false;
     T::eq('denied', $on->voice->handle($on->msg(FREE_ID), 93), 'expired PRO denied');
+});
+
+test('Bale voices with an empty file_unique_id are not duplicates', function () {
+    $rig = new VoiceRig();
+    $rig->voice->withAccess(fn () => 30);
+    T::eq('transcribed', $rig->voice->handle($rig->msg(PREMIUM_ID, ['file_unique_id' => '']), 601));
+    T::eq('transcribed', $rig->voice->handle($rig->msg(PREMIUM_ID, ['file_unique_id' => '']), 602));
+});
+
+test('keepingText hands the words to the caller and sends nothing', function () {
+    $rig = new VoiceRig();
+    $rig->voice->withAccess(fn () => 30)->keepingText();
+    $before = count($rig->replies);
+    T::eq('transcribed', $rig->voice->handle($rig->msg(PREMIUM_ID, ['file_unique_id' => '']), 701));
+    T::ok($rig->voice->text !== '', 'text kept');
+    T::eq($before, count($rig->replies), 'the transcript is not sent to the user');
+});
+
+test('weekly voice limit stops the second voice', function () {
+    $rig = new VoiceRig();
+    $rig->voice->withAccess(fn () => 30)->withWeeklyLimit(fn () => 1);
+    T::eq('transcribed', $rig->voice->handle($rig->msg(PREMIUM_ID, ['duration' => 5, 'file_size' => 10000]), 501));
+    T::eq('weekly_quota', $rig->voice->handle($rig->msg(PREMIUM_ID, ['duration' => 5, 'file_size' => 10000]), 502));
+});
+
+test('Bale duration the file size rules out is read as milliseconds', function () {
+    T::eq(1, Bot\VoiceTranscriber::realSeconds(1000, 2000, 300), 'one second reported as 1000');
+    T::eq(12, Bot\VoiceTranscriber::realSeconds(12, 24000, 300));
+    T::eq(3600, Bot\VoiceTranscriber::realSeconds(3600, 7200000, 300));
+    T::eq(5, Bot\VoiceTranscriber::realSeconds(0, 10000, 300), 'missing duration uses size');
 });
 
 test('Bale voice without duration / mime type still works within limits', function () {

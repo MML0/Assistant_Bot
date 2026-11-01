@@ -30,6 +30,12 @@ final class VoiceTranscriber
     private $alert;
     /** @var callable */
     private $now;
+    /** @var callable|null */
+    private $access = null;
+    /** @var callable|null */
+    private $weeklyLimit = null;
+    private bool $keepText = false;
+    public string $text = '';
 
     public function __construct(PDO $db, ClientInterface $http, array $settings, Entitlements $entitlements, JsonStore $store, string $botToken, callable $reply, ?callable $alert = null, ?callable $now = null, ?callable $proCheck = null)
     {
@@ -47,9 +53,16 @@ final class VoiceTranscriber
         $this->now          = $now ?? fn () => microtime(true);
     }
 
+    /** @param callable $access telegram user id => daily minutes allowed; 0 = no access */
+    public function withAccess(callable $access): self
+    {
+        $this->access = $access;
+        return $this;
+    }
+
     public static function isAudioMessage(array $message): bool
     {
-        return isset($message['voice']) || isset($message['audio']);
+        return isset($message['voice']) || isset($message['audio']) || self::audioDocument($message) !== null;
     }
 
     /** @return string outcome code (for logs/tests); the user always gets a short friendly reply. */
@@ -58,7 +71,7 @@ final class VoiceTranscriber
         $chatId   = $message['chat']['id'] ?? null;
         $senderId = (int) ($message['from']['id'] ?? 0);
         $isGroup  = in_array($message['chat']['type'] ?? 'private', ['group', 'supergroup', 'channel'], true);
-        $media    = $message['voice'] ?? $message['audio'] ?? null;
+        $media    = $message['voice'] ?? $message['audio'] ?? self::audioDocument($message);
         if ($chatId === null || $senderId <= 0 || !is_array($media)) {
             return 'ignored';
         }
@@ -67,13 +80,23 @@ final class VoiceTranscriber
         }
 
         // 1) Paid entitlement, server-side, before any download or provider call.
-        if (!$this->isEntitled($senderId)) {
+        $minutesAllowed = $this->access ? (int) ($this->access)($senderId) : null;
+        $this->logMeta($media, $senderId, $minutesAllowed);
+        if ($minutesAllowed !== null ? $minutesAllowed <= 0 : !$this->isEntitled($senderId)) {
             if (!$isGroup) {
                 $this->send($chatId, "🎤 تبدیل پیام صوتی به متن فقط برای کاربرانی فعال است که اشتراک PRO را خریداری کرده‌اند.\n\nبرای خرید اشتراک: /buypro");
             }
             return 'denied';
         }
-        if (!$this->cfg['enabled'] || $this->cfg['api_key'] === '' || $this->cfg['base_url'] === '') {
+        if ($minutesAllowed !== null) {
+            $this->cfg['max_minutes_per_day'] = $minutesAllowed;
+        }
+        $weekly = $this->weeklyLimit ? (int) ($this->weeklyLimit)($senderId) : 0;
+        if ($weekly > 0 && $this->usedThisWeek($senderId) >= $weekly) {
+            $this->send($chatId, "⏳ سهمیه این هفته تبدیل صدا به متن شما ({$weekly} پیام) تمام شده است.\n\nبرای سهمیه بیشتر: /buypro");
+            return 'weekly_quota';
+        }
+        if (!$this->cfg['enabled'] || !$this->chain()) {
             $this->send($chatId, '❌ تبدیل صدا به متن فعلاً در دسترس نیست.');
             return 'disabled';
         }
@@ -85,11 +108,7 @@ final class VoiceTranscriber
 
         // 2) Metadata limits (Telegram tells us size/duration before we download).
         $size     = isset($media['file_size']) ? (int) $media['file_size'] : null;
-        $duration = (int) ($media['duration'] ?? 0);
-        if ($duration <= 0) {
-            // Some clients omit the duration: estimate conservatively from size (~16 kbit/s voice).
-            $duration = $size ? max(1, (int) ceil($size / 2000)) : (int) $this->cfg['max_duration_seconds'];
-        }
+        $duration = self::realSeconds((int) ($media['duration'] ?? 0), $size, (int) $this->cfg['max_duration_seconds']);
         $mime = strtolower((string) ($media['mime_type'] ?? ''));
         if ($duration > $this->cfg['max_duration_seconds']) {
             $this->send($chatId, "⚠️ فقط پیام‌های صوتی تا {$this->cfg['max_duration_seconds']} ثانیه قابل تبدیل به متن هستند.");
@@ -100,7 +119,7 @@ final class VoiceTranscriber
             return 'too_large';
         }
         // A missing MIME type is allowed; the real content is checked after download.
-        if ($mime !== '' && !in_array($mime, $this->cfg['allowed_mime_types'], true)) {
+        if ($mime !== '' && !in_array($mime, $this->cfg['allowed_mime_types'], true) && !preg_match('~^(audio/|video/(ogg|mp4|webm)$|application/(ogg|octet-stream)$)~', $mime)) {
             $this->send($chatId, '⚠️ این فرمت صوتی پشتیبانی نمی‌شود.');
             return 'invalid_format';
         }
@@ -142,7 +161,8 @@ final class VoiceTranscriber
         $tmp = null;
         $usageId = null;
         try {
-            if (isset($media['file_unique_id']) && !$dedupe->firstSeen('f:' . $senderId . ':' . $media['file_unique_id'])) {
+            // Bale sends an empty file_unique_id, which must not make every voice look the same.
+            if (!empty($media['file_unique_id']) && !$dedupe->firstSeen('f:' . $senderId . ':' . $media['file_unique_id'])) {
                 $this->send($chatId, 'ℹ️ این فایل صوتی قبلاً به متن تبدیل شده است.');
                 return 'duplicate_audio';
             }
@@ -167,12 +187,20 @@ final class VoiceTranscriber
             $cost = round($duration / 60 * (float) $this->cfg['cost_per_minute_usd'], 6);
             $usageId = $this->recordUsage($senderId, $internalUserId, $updateId, $duration, $bytes, 'pending', $cost);
 
-            [$ok, $text, $why] = $this->transcribe($tmp, $kind);
+            [$ok, $text, $why, $usedName, $usedModel] = $this->transcribe($tmp, $kind);
+            $this->db->prepare("UPDATE {$this->usageTable} SET provider = ?, model = ? WHERE id = ?")->execute([$usedName, $usedModel, $usageId]);
             $this->setUsageStatus($usageId, $ok ? 'ok' : $why, $ok || $why === 'timeout' ? $cost : 0.0);
             if (!$ok) {
                 $this->notify("🚨 Transcription failed ({$why}).");
                 $this->send($chatId, '❌ متأسفانه تبدیل این پیام صوتی انجام نشد. لطفاً بعداً دوباره تلاش کنید.');
                 return 'provider_error';
+            }
+            if ($this->keepText) {
+                $this->text = trim($text);
+                if ($this->text === '') {
+                    $this->send($chatId, '🎤 صحبتی در این پیام صوتی تشخیص داده نشد. لطفاً دوباره بفرستید.');
+                }
+                return 'transcribed';
             }
             $text = trim($text) === '' ? '(صحبتی تشخیص داده نشد)' : trim($text);
             foreach (self::chunks("📝 متن پیام صوتی:\n\n" . $text, 4000) as $part) {
@@ -205,6 +233,63 @@ final class VoiceTranscriber
         $stmt = $this->db->prepare("SELECT COALESCE(SUM(duration_seconds), 0) FROM {$this->usageTable} WHERE telegram_user_id = ? AND created_at >= ? AND status IN ('ok', 'pending', 'timeout')");
         $stmt->execute([$senderId, date('Y-m-d 00:00:00', $now)]);
         return [$hour, ((int) $stmt->fetchColumn()) / 60];
+    }
+
+    /**
+     * Seconds of audio. Bale can report a duration far beyond what the file could hold (a one-second
+     * voice arrived as over 300), so a value the size rules out is read as milliseconds.
+     */
+    public static function realSeconds(int $reported, ?int $size, int $max): int
+    {
+        if ($reported <= 0) {
+            // Some clients omit the duration: estimate conservatively from size (~16 kbit/s voice).
+            return $size ? max(1, (int) ceil($size / 2000)) : $max;
+        }
+        $impossible = $size !== null ? $reported > max(5, (int) ceil($size / 500)) : $reported > $max;
+        if (!$impossible) {
+            return $reported;
+        }
+        $fromMs = (int) ceil($reported / 1000);
+        return $size !== null ? max($fromMs, (int) ceil($size / 2000)) : $fromMs;
+    }
+
+    /** A voice sent as a file arrives as a document with an audio type. */
+    private static function audioDocument(array $message): ?array
+    {
+        $doc = $message['document'] ?? null;
+        return is_array($doc) && str_starts_with(strtolower((string) ($doc['mime_type'] ?? '')), 'audio/') ? $doc : null;
+    }
+
+    /** The caller answers the voice itself: the words are kept in $text instead of being sent back. */
+    public function keepingText(): self
+    {
+        $this->keepText = true;
+        return $this;
+    }
+
+    /** Sets the voices-per-week allowance per user; 0 means no weekly limit. */
+    public function withWeeklyLimit(callable $limit): self
+    {
+        $this->weeklyLimit = $limit;
+        return $this;
+    }
+
+    /** Voices in the last 7 days. Failed ones do not count. */
+    public function usedThisWeek(int $senderId): int
+    {
+        $stmt = $this->db->prepare("SELECT COUNT(*) FROM {$this->usageTable} WHERE telegram_user_id = ? AND created_at >= ? AND status IN ('ok', 'pending', 'timeout')");
+        $stmt->execute([$senderId, date('Y-m-d H:i:s', (int) ($this->now)() - 7 * 86400)]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    private function logMeta(array $media, int $senderId, ?int $minutes): void
+    {
+        if (defined('BOT_TESTING')) {
+            return;
+        }
+        unset($media['file_id'], $media['file_unique_id']);
+        $media += ['sender' => $senderId, 'minutes_allowed' => $minutes];
+        @file_put_contents(dirname(__DIR__) . '/storage/logs/voice_meta.jsonl', date('Y-m-d H:i:s ') . json_encode($media, JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND | LOCK_EX);
     }
 
     private function recordUsage(int $senderId, ?int $userId, ?int $updateId, int $duration, int $bytes, string $status, float $cost): int
@@ -288,19 +373,45 @@ final class VoiceTranscriber
         return null;
     }
 
-    /** @return array{0:bool,1:string,2:string} ok, text, failure-reason */
+    /** Providers in order; the single configured one when no order is set. */
+    private function chain(): array
+    {
+        if (!empty($this->cfg['providers'])) {
+            return $this->cfg['providers'];
+        }
+        return $this->cfg['api_key'] !== '' && $this->cfg['base_url'] !== ''
+            ? [['name' => parse_url($this->cfg['base_url'], PHP_URL_HOST) ?: 'unknown', 'base_url' => $this->cfg['base_url'], 'api_key' => $this->cfg['api_key'], 'model' => $this->cfg['model']]]
+            : [];
+    }
+
+    /** @return array{0:bool,1:string,2:string,3:string,4:string} ok, text, last failure reason, provider, model */
     private function transcribe(string $path, array $kind): array
     {
+        $why = 'no_provider';
+        $last = ['name' => '', 'model' => ''];
+        foreach ($this->chain() as $p) {
+            $last = $p;
+            [$ok, $text, $why] = $this->transcribeWith($p, $path, $kind);
+            if ($ok) {
+                return [true, $text, '', $p['name'], $p['model']];
+            }
+        }
+        return [false, '', $why, $last['name'], $last['model']];
+    }
+
+    /** @return array{0:bool,1:string,2:string} ok, text, failure-reason */
+    private function transcribeWith(array $provider, string $path, array $kind): array
+    {
         $parts = [
-            ['name' => 'model', 'contents' => $this->cfg['model']],
+            ['name' => 'model', 'contents' => $provider['model']],
             ['name' => 'file', 'contents' => (string) file_get_contents($path), 'filename' => $kind[0], 'headers' => ['Content-Type' => $kind[1]]],
         ];
         if (!empty($this->cfg['language'])) {
             $parts[] = ['name' => 'language', 'contents' => $this->cfg['language']];
         }
         try {
-            $res = $this->http->request('POST', rtrim($this->cfg['base_url'], '/') . '/audio/transcriptions', [
-                'headers'   => ['Authorization' => 'Bearer ' . $this->cfg['api_key']],
+            $res = $this->http->request('POST', rtrim($provider['base_url'], '/') . '/audio/transcriptions', [
+                'headers'   => ['Authorization' => 'Bearer ' . $provider['api_key']],
                 'multipart' => $parts,
                 'timeout'   => (float) $this->cfg['timeout'],
                 'connect_timeout' => 5,

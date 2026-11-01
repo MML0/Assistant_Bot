@@ -15,7 +15,6 @@ use GuzzleHttp\ClientInterface;
  */
 final class PaidClient
 {
-    private const RETIRED_FILE = 'paid_models.json';
     private const RETIRED_SECONDS = 86400;
 
     private ClientInterface $http;
@@ -26,9 +25,13 @@ final class PaidClient
     private $now;
     /** @var callable */
     private $sleep;
+    public string $provider;
+    private string $retiredFile;
 
-    public function __construct(ClientInterface $http, array $settings, PaidBudget $budget, ?callable $now = null, ?callable $sleep = null, ?JsonStore $store = null)
+    public function __construct(ClientInterface $http, array $settings, PaidBudget $budget, ?callable $now = null, ?callable $sleep = null, ?JsonStore $store = null, string $provider = 'metis')
     {
+        $this->provider = $provider;
+        $this->retiredFile = $provider === 'metis' ? 'paid_models.json' : "paid_models_{$provider}.json";
         $this->http     = $http;
         $this->settings = $settings;
         $this->budget   = $budget;
@@ -135,7 +138,7 @@ final class PaidClient
             return [];
         }
         $now = ($this->now)();
-        return array_filter($this->store->read(self::RETIRED_FILE, [])['retired'] ?? [], fn ($r) => ($r['until'] ?? 0) > $now);
+        return array_filter($this->store->read($this->retiredFile, [])['retired'] ?? [], fn ($r) => ($r['until'] ?? 0) > $now);
     }
 
     /** Configured order, retired models last (still tried if nothing else is left). */
@@ -150,7 +153,7 @@ final class PaidClient
     private function markRetired(string $model, string $why): void
     {
         $until = ($this->now)() + self::RETIRED_SECONDS;
-        $this->store?->update(self::RETIRED_FILE, function (&$d) use ($model, $why, $until) {
+        $this->store?->update($this->retiredFile, function (&$d) use ($model, $why, $until) {
             $d['retired'][$model] = ['until' => $until, 'why' => mb_substr($why, 0, 200)];
         });
     }

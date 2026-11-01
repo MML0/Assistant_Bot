@@ -24,8 +24,11 @@ final class Router
     /** @var callable */
     private $now;
 
-    public function __construct(array $settings, ModelCatalog $catalog, ModelHealth $health, OpenRouterClient $free, PaidClient $paid, RoutingLog $log, JsonStore $store, ?callable $alert = null, ?callable $now = null)
+    private ?PaidClient $backup;
+
+    public function __construct(array $settings, ModelCatalog $catalog, ModelHealth $health, OpenRouterClient $free, PaidClient $paid, RoutingLog $log, JsonStore $store, ?callable $alert = null, ?callable $now = null, ?PaidClient $backup = null)
     {
+        $this->backup  = $backup;
         $this->s       = $settings;
         $this->catalog = $catalog;
         $this->health  = $health;
@@ -173,21 +176,32 @@ final class Router
             return $this->finish($base, $start, $attempts, false, null, null, null, null, $lastError['class'] ?? $why, $fallbackReason ?? $why, $this->msg('unavailable'));
         }
 
-        $paidModels = $opts['paid_models'] ?? (isset($opts['paid_model']) ? [$opts['paid_model']] : null)
-            ?? ($tier ? $this->s['tiers'][$tier]['paid_models'] : null) ?? [$this->s['paid']['default_model']];
+        $modelsFor = function (PaidClient $client) use ($opts, $tier) {
+            $key = $client->provider === 'gapgpt' ? 'gapgpt_models' : 'paid_models';
+            return $opts['paid_models'] ?? (isset($opts['paid_model']) ? [$opts['paid_model']] : null)
+                ?? ($tier ? ($this->s['tiers'][$tier][$key] ?? null) ?: ($this->s['tiers'][$tier]['paid_models'] ?? null) : null) ?? [$this->s['paid']['default_model']];
+        };
         $paidDeadline = ($explicitPaid || $mode === 'paid_only') ? $start + (float) $r['total_deadline_seconds'] : $deadline;
         $paidAttempt = $attempts;
-        $res = $this->paid->complete($paidModels, $messages, $paidDeadline, function (array $a) use (&$paidAttempt, $base, $fallbackReason) {
+        $paidProvider = $this->paid->provider;
+        $onPaid = function (array $a) use (&$paidAttempt, &$paidProvider, $base, $fallbackReason) {
             $paidAttempt++;
             $this->log->record('attempt', $base + [
-                'attempt' => $paidAttempt, 'tier' => 'paid', 'model' => $a['model_used'], 'free' => false,
+                'attempt' => $paidAttempt, 'tier' => 'paid', 'provider' => $paidProvider, 'model' => $a['model_used'], 'free' => false,
                 'reason' => 'paid:' . $fallbackReason, 'latency_ms' => $a['latency_ms'], 'tokens_in' => $a['tokens_in'] ?? null,
                 'tokens_out' => $a['tokens_out'] ?? null, 'cost_usd' => $a['cost'] ?? null, 'cost_source' => $a['cost_source'] ?? null,
                 'success' => $a['ok'], 'error_class' => $a['error']['class'] ?? null,
                 'possibly_processed' => $a['error']['possibly_processed'] ?? null, 'detail' => $a['error']['detail'] ?? null,
                 'status' => $a['error']['status'] ?? null,
             ]);
-        });
+        };
+        $res = $this->paid->complete($modelsFor($this->paid), $messages, $paidDeadline, $onPaid);
+
+        // The next provider gets its own time: the first one may have used all of it.
+        if (!$res['ok'] && $this->backup?->isConfigured() && !in_array($res['error']['class'], [ErrorClassifier::BUDGET, ErrorClassifier::REFUSAL], true)) {
+            $paidProvider = $this->backup->provider;
+            $res = $this->backup->complete($modelsFor($this->backup), $messages, ($this->now)() + (float) $this->s['paid']['attempt_timeout'] * 2, $onPaid);
+        }
 
         if ($res['ok']) {
             return $this->finish($base, $start, $paidAttempt, true, 'paid', $res['model_used'], $res['content'], false, null, $fallbackReason);

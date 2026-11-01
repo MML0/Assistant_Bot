@@ -31,9 +31,40 @@ function sendButtons($chatId, $text, $buttons, $parseMode = null) {
     curl_close($ch);
 }
 
-// PRO packages (one place for titles, prices in rial and days).
+// Reply keyboard next to the text box. Stays until replaced, so it is sent with /start and /help.
+function sendMainKeyboard($chatId, $text) {
+    baleCall('sendMessage', [
+        'chat_id' => $chatId,
+        'text' => $text,
+        'reply_markup' => ['keyboard' => Bot\Plans::keyboardRows(), 'resize_keyboard' => true],
+    ]);
+}
+
+// Bale needs a real file upload for an image we generated.
+function sendPhotoFile($chatId, string $path, ?string $mime, string $caption): array {
+    global $config;
+    $ch = curl_init(telegramApiBase() . "/bot{$config['telegram']['bot_token']}/sendPhoto");
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => [
+            'chat_id' => $chatId,
+            'caption' => $caption,
+            'photo'   => new CURLFile($path, $mime ?: 'image/png', 'image.png'),
+        ],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_TIMEOUT        => 60,
+    ]);
+    $raw = curl_exec($ch);
+    curl_close($ch);
+    $json = is_string($raw) ? json_decode($raw, true) : null;
+    return is_array($json) ? $json : ['ok' => false, 'description' => 'network error'];
+}
+
+// Everything that can be bought: the current plans, plus the old packages so invoices
+// already sent can still be paid (one place for titles, prices in rial and days).
 function buyProPackages(): array {
-    return [
+    return Bot\Plans::packages(botServices()->settings) + [
         'smart' => [
             'title' => 'بسته هوشمندانه ۴۴ روزه',
             'description' => 'دسترسی ۴۴ روزه به امکانات PRO',
@@ -133,7 +164,7 @@ function handleCallback($update) {
     if (str_starts_with($data, 'setmodel_')) {
 
         // Check if user is PRO and not expired
-        $stmt = $db->prepare("SELECT is_pro, pro_expire FROM " . T_USERS . " WHERE chat_id = ?");
+        $stmt = $db->prepare("SELECT * FROM " . T_USERS . " WHERE chat_id = ?");
         $stmt->execute([$chatId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -159,6 +190,12 @@ function handleCallback($update) {
             return true;
         }
 
+        // The plan decides which tiers this user may choose.
+        if (!Bot\Plans::tierAllowed(botServices()->settings, true, $row['plan'] ?? null, $model)) {
+            answerCallback($callback['id'], "این مدل در پلن شما فعال نیست.");
+            sendButtons($chatId, "🚫 این مدل در پلن فعلی شما فعال نیست.", plansButton());
+            return true;
+        }
         $stmt = $db->prepare("UPDATE " . T_USERS . " SET model = ? WHERE chat_id = ?");
         $stmt->execute([$model, $chatId]);
 

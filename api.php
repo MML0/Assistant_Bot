@@ -4,6 +4,7 @@ $config = require __DIR__ . '/config.php';
 require __DIR__ . '/vendor/autoload.php';
 require __DIR__ . '/commands.php';
 require __DIR__ . '/buttons.php';
+require __DIR__ . '/media_handlers.php';
 require __DIR__ . '/src/bootstrap.php';
 
 $adminChatId = $config['telegram']['admin_chatid'];
@@ -54,12 +55,18 @@ function getUserTier($chatId) {
     $settings = botServices()->settings;
 
     if (empty($isPro)) return $settings['default_tier'];
+    global $user;
 
     $stmt = $db->prepare("SELECT model FROM " . T_USERS . " WHERE chat_id = ?");
     $stmt->execute([$chatId]);
     $tier = $stmt->fetchColumn();
 
-    return isset($settings['tiers'][$tier]) ? $tier : $settings['default_tier'];
+    if (!isset($settings['tiers'][$tier])) return $settings['default_tier'];
+    // A tier the plan no longer includes falls back to the first one it does.
+    if (!Bot\Plans::tierAllowed($settings, true, $user['plan'] ?? null, $tier)) {
+        return Bot\Plans::limits($settings, true, $user['plan'] ?? null)['tiers'][0] ?? $settings['default_tier'];
+    }
+    return $tier;
 }
 
 function tierLabel($tier): string {
@@ -103,7 +110,7 @@ function summarize_history(array $messageHistory): ?string{
 
     // Use your chat API function (expects role-based messages)
     $messages = [
-        ['role' => 'system', 'content' => 'You are a helpful assistant that summarizes conversations.'],
+        ['role' => 'system', 'content' => botServices()->settings['prompts']['summary']],
         ['role' => 'user',   'content' => $prompt],
     ];
 
@@ -334,6 +341,31 @@ function baleCall(string $method, array $params, int $timeout = 8): array {
     return $res ?? ['ok' => false, 'description' => 'network error'];
 }
 
+// Same as baleCall, but JSON only, so true stays a real boolean.
+function baleCallJson(string $method, array $params, int $timeout = 8): array {
+    global $config;
+    $ch = curl_init(telegramApiBase() . "/bot{$config['telegram']['bot_token']}/{$method}");
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => json_encode($params, JSON_UNESCAPED_UNICODE),
+        CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CONNECTTIMEOUT => 3,
+        CURLOPT_TIMEOUT        => $timeout,
+    ]);
+    $raw = curl_exec($ch);
+    curl_close($ch);
+    $json = is_string($raw) ? json_decode($raw, true) : null;
+    return is_array($json) ? $json : ['ok' => false, 'description' => 'network error'];
+}
+
+// One line per payment step with the time since the webhook started, for tracing failed payments.
+function paymentLog(string $step, array $data): void {
+    $line = ['at' => date('Y-m-d H:i:s'), 'step' => $step, 'ms' => (int) ((microtime(true) - $_SERVER['REQUEST_TIME_FLOAT']) * 1000)] + $data;
+    @file_put_contents(__DIR__ . '/storage/logs/payments.jsonl', json_encode($line, JSON_UNESCAPED_UNICODE) . "
+", FILE_APPEND | LOCK_EX);
+}
+
 function sendTelegramMessage($chatId, $text, $parseMode = null): void {
     global $config;
 
@@ -445,6 +477,9 @@ $update = json_decode($rawUpdate, true);
 if (!is_array($update)) {
     exit;
 }
+if (preg_match('/payment|invoice|refund/i', $rawUpdate) && !isset($update['pre_checkout_query'])) {
+    paymentLog('raw', ['update' => $update]);
+}
 // Bale re-delivers updates when the webhook is slow; never process (or credit) one twice.
 // The key includes a hash of the body, so two different updates can never be mistaken for one.
 if (isset($update['update_id']) && !(new Bot\UpdateDeduper(botServices()->store))->firstSeen('u:' . $update['update_id'] . ':' . md5($rawUpdate))) {
@@ -452,7 +487,18 @@ if (isset($update['update_id']) && !(new Bot\UpdateDeduper(botServices()->store)
 }
 // Handle inline button presses
 if (isset($update['callback_query'])) {
-    if (handleCallback($update)) {
+    $menuCommand = Bot\Plans::commandForCallback((string) ($update['callback_query']['data'] ?? ''));
+    if ($menuCommand !== null) {
+        // A menu button runs its command through the normal message flow below.
+        $callback = $update['callback_query'];
+        answerCallback($callback['id']);
+        $update['message'] = [
+            'message_id' => $callback['message']['message_id'] ?? 0,
+            'from' => $callback['from'],
+            'chat' => ($callback['message']['chat'] ?? ['id' => $callback['from']['id']]) + ['type' => 'private'],
+            'text' => $menuCommand,
+        ];
+    } elseif (handleCallback($update)) {
         exit;
     }
 }
@@ -465,11 +511,13 @@ if (isset($update['pre_checkout_query'])) {
     $preCheckout = $update['pre_checkout_query'];
     $preCheckoutId = $preCheckout['id'];
 
-    // Accept all payments, exactly as before (the real check is inquireTransaction after payment).
-    $result = baleCall('answerPreCheckoutQuery', [
+    // Accept all payments (the real check is inquireTransaction after payment).
+    // Bale documents ok as a Boolean, so this goes as JSON with a real true, not the form value "1".
+    $result = baleCallJson('answerPreCheckoutQuery', [
         'pre_checkout_query_id' => $preCheckoutId,
         'ok' => true,
     ], 6);
+    paymentLog('pre_checkout', ['update' => $preCheckout, 'answer' => $result]);
     if (empty($result['ok'])) {
         sendTelegramMessage($adminChatId, "⚠️ answerPreCheckoutQuery ناموفق بود (پرداخت کاربر تایید نشد):\n" . Bot\Redactor::redact(json_encode($result, JSON_UNESCAPED_UNICODE), 300), '');
     } elseif (!empty($config['payment']['debug'] ?? true)) {
@@ -490,9 +538,10 @@ if (isset($update['message']['successful_payment'])) {
     $totalAmount = $payment['total_amount'];
     $telegramPaymentChargeId = $payment['telegram_payment_charge_id'];
     $providerPaymentChargeId = $payment['provider_payment_charge_id'];
+    paymentLog('successful_payment', ['payment' => $payment, 'from' => $update['message']['from']['id'] ?? null]);
 
     // Parse package from payload: buypro_{package}_{userId}_{timestamp}
-    if (preg_match('/^buypro_(smart|economic|pro)_([0-9]+)_/', $payload, $m)) {
+    if (preg_match('/^buypro_([a-z]+)_([0-9]+)_/', $payload, $m) && isset(buyProPackages()[$m[1]])) {
         $package = $m[1];
         $paidUserId = $m[2];
         // Only proceed if user matches
@@ -525,6 +574,7 @@ if (isset($update['message']['successful_payment'])) {
                         sleep(2);
                     }
                 }
+                paymentLog('inquire', ['charge_id' => $telegramPaymentChargeId, 'tries' => $try, 'answer' => $txn]);
                 sendTelegramMessage($adminChatId, "inquireResult: " . Bot\Redactor::redact(json_encode($txn, JSON_UNESCAPED_UNICODE), 500), '');
                 if (isPaidStatus($status)) {
                     $status = 'paid';
@@ -532,6 +582,13 @@ if (isset($update['message']['successful_payment'])) {
                 recordPayment($userId, (int) $row['id'], $package, $totalAmount, $currency, $payload, $telegramPaymentChargeId, $providerPaymentChargeId, (string) $status, $expireDays[$package]);
                 if ($status === 'paid') {
                     makeUserPro($row['id'], null, $expireAt);
+                    // Limits follow the plan. Old packages have no plan: they stay unlimited.
+                    $boughtPlan = isset(botServices()->settings['plans'][$package]) ? $package : null;
+                    try {
+                        $db->prepare("UPDATE " . T_USERS . " SET plan = ? WHERE id = ?")->execute([$boughtPlan, $row['id']]);
+                    } catch (\Throwable $e) {
+                        sendTelegramMessage($adminChatId, "⚠️ ثبت پلن ناموفق بود، migrate.php را اجرا کنید: ChatID {$userId} | پلن: {$package}", '');
+                    }
                     // Upgrade the model tier if the user is still on the default (normal) tier
                     $stmt = $db->prepare("SELECT model FROM " . T_USERS . " WHERE id = ?");
                     $stmt->execute([$row['id']]);
@@ -551,7 +608,7 @@ if (isset($update['message']['successful_payment'])) {
                     }
                     $cost = number_format($totalAmount);
                     $receipt = "\nرسید پرداخت:\nشماره تراکنش: {$telegramPaymentChargeId}\nپیگیری: {$providerPaymentChargeId}";
-                    sendTelegramMessage($chatId, "🎉 پرداخت با موفقیت تایید شد!\nبسته: {$package}\nمدت: {$days} روز\nمبلغ: {$cost} ریال{$receipt}\nاکنون PRO فعال شد.\n🎤 تبدیل پیام صوتی به متن هم برای شما فعال شد.");
+                    sendTelegramMessage($chatId, "🎉 پرداخت با موفقیت تایید شد!\nبسته: " . buyProPackages()[$package]['title'] . "\nمدت: {$days} روز\nمبلغ: {$cost} ریال{$receipt}\nاکنون PRO فعال شد.\n🎤 تبدیل پیام صوتی به متن هم برای شما فعال شد.");
                     // Send compact admin notification with more user info
                     $adminMsg = "پرداخت تایید شد\n"
                         . "نام: " . ($update['message']['from']['first_name'] ?? '') . " " . ($update['message']['from']['last_name'] ?? '') . "\n"
@@ -585,6 +642,7 @@ $username   = $update['message']['from']['username'] ?? null;
 $firstName  = $update['message']['from']['first_name'] ?? null;
 $lastName   = $update['message']['from']['last_name'] ?? null;
 $userText   = $update['message']['text'] ?? '';
+$userText   = Bot\Plans::commandForButton($userText) ?? $userText; // reply-keyboard buttons
 
 // Check if message is from group
 $isGroup = $update['message']['chat']['type'] === 'group' || $update['message']['chat']['type'] === 'supergroup';
@@ -614,14 +672,29 @@ if (isset($update['message'])) {
             // only used when transcription.allow_referral_pro = true
             return $voiceUser && $voiceUser['is_pro'] && (empty($voiceUser['pro_expire']) || strtotime($voiceUser['pro_expire']) > time());
         });
-        $voice->handle($message, $update['update_id'] ?? null, $voiceUser ? (int) $voiceUser['id'] : null);
+        $voice->withAccess('voiceMinutesFor')->withWeeklyLimit('voiceWeeklyLimitFor')->keepingText()->handle($message, $update['update_id'] ?? null, $voiceUser ? (int) $voiceUser['id'] : null);
+        if ($voice->text === '') {
+            exit;
+        }
+        // The words go on as if the user had typed them, so the bot answers the voice.
+        finishWebhookEarly();
+        $userText = $voice->text;
+        $voiceAnswered = true;
+    }
+
+    // ----------------- PHOTO → ANSWER (limits come from the plan) -----------------
+    if (!$isGroup && isset($message['photo']) && is_array($message['photo'])) {
+        if (!empty($config['monitor_forward_media'] ?? true)) {
+            sendTelegramForward($monitorChatId, $chatId, $message['message_id']);
+        }
+        handlePhotoMessage($message);
         exit;
     }
 
     // Check for media types
     $mediaTypes = ['photo', 'video', 'voice', 'audio', 'document', 'animation', 'sticker'];
     foreach ($mediaTypes as $type) {
-        if (isset($message[$type])) {
+        if (isset($message[$type]) && empty($voiceAnswered)) {
             // Forward the media message to the specified chat
             $forwardChatId = $monitorChatId;
             $messageId = $message['message_id'];
@@ -709,6 +782,11 @@ if (!$user) {
     if ($isPro && $proExpire && strtotime($proExpire) < time()) {
         $isPro = 0; // pro expired
         $userModel = botServices()->settings['default_tier']; // default tier
+        if (!empty($user['plan'])) {
+            // A finished plan must not limit a later referral or code PRO.
+            $db->prepare("UPDATE " . T_USERS . " SET plan = NULL WHERE id = ?")->execute([$userId]);
+            $user['plan'] = null;
+        }
     }
 }
 
@@ -723,7 +801,7 @@ $iranTime = new DateTime('now', new DateTimeZone('Asia/Tehran'));
 $iranHour = $iranTime->format('H');              // e.g. "07", "14"
 $proCode  = 'pro' . ($iranHour*3+4)%30;                  // e.g. "pro07"
 
-if (strtolower(trim($userText)) === $proCode) {
+if (!empty(botServices()->settings['features']['secret_pro_code']) && strtolower(trim($userText)) === $proCode) {
     // lifetime PRO
     // makeUserPro(null, $chatId, null);
     $expireAt = (new DateTime('+7 days'))->format('Y-m-d H:i:s');
@@ -742,8 +820,18 @@ if (strtolower(trim($userText)) === $proCode) {
     exit; // stop further processing for this update
 }
 
+// The description after pressing «ساخت تصویر»
+if (botMedia()->takePending((int) $senderId)) {
+    handleImageRequest($chatId, $senderId, trim($userText));
+    exit;
+}
+
 // ----------------- DAILY MESSAGE LIMIT -----------------
-if (!$isPro) {
+if ($isPro) {
+    $HISTORY_LIMIT = PRO_HISTORY_LIMIT;
+}
+$chatLimit = Bot\Plans::dailyChatLimit(botServices()->settings, (bool) $isPro, $user['plan'] ?? null);
+if ($chatLimit !== null) {
     $stmt = $db->prepare("
         SELECT COUNT(*) 
         FROM " . T_MESSAGES . " 
@@ -754,24 +842,31 @@ if (!$isPro) {
     $stmt->execute([$userId]);
     $countToday = (int) $stmt->fetchColumn();
 
-    if ($countToday >= FREE_DAILY_LIMIT) {
-        sendTelegramMessage(
-            $chatId,
-            "شما به سقف روزانه «" . FREE_DAILY_LIMIT . "» پیام رایگان رسیدید. 🚫📩\n"
-            ."*برای ارتقا به نسخه PRO و دریافت امکانات زیر اقدام کنید:* 🚀\n"
-            ." • حافظه چت بلندمدت و پایدار 🧠💾\n"
-            ." • پیام‌های نامحدود ♾️\n"
-            ." • انتخاب مدل‌های هوشمند 🧠 و فوق هوشمند 🚀\n\n"
-            ."برای ارتقا /getpro (رایگان با معرفی به دیگران) 🎁\n"
-            ."یا /buypro (خرید) 💳 استفاده کنید."
-        );
-
+    if ($countToday >= $chatLimit) {
+        $limitButtons = [[['text' => '💎 پلن‌های اشتراک', 'callback_data' => 'cmd_buypro'], ['text' => '📊 مصرف من', 'callback_data' => 'cmd_usage']]];
+        if ($isPro) {
+            sendButtons($chatId, "شما به سقف روزانه «{$chatLimit}» پیام پلن خود رسیدید. 🚫📩\nفردا دوباره می‌توانید پیام بدهید، یا پلن بالاتری تهیه کنید.", $limitButtons);
+        } else {
+            $limitButtons[] = [['text' => '🎁 PRO رایگان', 'callback_data' => 'cmd_getpro']];
+            sendButtons($chatId, "شما به سقف روزانه «{$chatLimit}» پیام رایگان رسیدید. 🚫📩\n"
+                ."*برای ادامه یکی از پلن‌ها را انتخاب کنید یا با معرفی به دوستان، PRO رایگان بگیرید:* 🚀\n"
+                ." • پیام‌های بیشتر در روز 📩\n"
+                ." • حافظه چت بلندمدت 🧠💾\n"
+                ." • انتخاب مدل‌های هوشمند 🧠 و فوق هوشمند 🚀", $limitButtons, "Markdown");
+        }
         exit;
     }
-}else{
-    $HISTORY_LIMIT = PRO_HISTORY_LIMIT;
 }
 
+$chatMonthLimit = Bot\Plans::limits(botServices()->settings, (bool) $isPro, $user['plan'] ?? null)['chat_per_month'];
+if ($chatMonthLimit > 0) {
+    $stmt = $db->prepare("SELECT COUNT(*) FROM " . T_MESSAGES . " WHERE user_id = ? AND created_at >= ? AND type = 'USER'");
+    $stmt->execute([$userId, date('Y-m-01 00:00:00')]);
+    if ((int) $stmt->fetchColumn() >= $chatMonthLimit) {
+        sendButtons($chatId, "شما به سقف ماهانه «{$chatMonthLimit}» پیام رسیدید. 🚫📩\nماه بعد دوباره می‌توانید پیام بدهید، یا پلن بالاتری تهیه کنید.", [[['text' => '💎 پلن‌های اشتراک', 'callback_data' => 'cmd_buypro'], ['text' => '📊 مصرف من', 'callback_data' => 'cmd_usage']]]);
+        exit;
+    }
+}
 
 // ----------------- SYSTEM PROMPT -----------------
 // Determine if user is PRO and get Persian date/time
@@ -784,17 +879,19 @@ $persianTime = $dt->format('H:i:s');
 
 $freeDailyLimitText = "";
 if (!$isPro) {
-    $freeDailyLimitText = " سقف روزانه پیام رایگان ." . FREE_DAILY_LIMIT;
+    $freeDailyLimitText = " سقف روزانه پیام رایگان ." . $chatLimit;
 }
 
-$systemPrompt = <<<EOT
-You are a helpful AI assistant in telegram chat no wierd markup text. Answer clearly and concisely.
-current iran Time miladi date: $persianDate $persianTime 
-$isProText
-$freeDailyLimitText
- نام کاربر : " $firstName $lastName " usernam : " $username 
- say hi to them by name"
-EOT;
+// The wording is edited in the dashboard; only the placeholders are filled in here.
+$systemPrompt = strtr(botServices()->settings['prompts']['chat'], [
+    '{date}' => $persianDate,
+    '{time}' => $persianTime,
+    '{plan}' => $isProText,
+    '{limit}' => $freeDailyLimitText,
+    '{first_name}' => (string) $firstName,
+    '{last_name}' => (string) $lastName,
+    '{username}' => (string) $username,
+]);
 // sendTelegramMessage($adminChatId, $systemPrompt);
 
 

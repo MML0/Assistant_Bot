@@ -9,3 +9,5 @@ ftp.php
 f.php
 *.zip
 __pycache__/
+graphify-out/*
+mcp/

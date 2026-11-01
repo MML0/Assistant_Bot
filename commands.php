@@ -55,11 +55,11 @@ if (str_starts_with($lower, '/start')) {
 
     // ---- Greeting the new user ----
     if ($referrer) {
-        sendTelegramMessage($chatId,
+        sendMainKeyboard($chatId,
         "👋 خوش آمدید! معرف شناسایی شد.\n\nبرای دیدن دستورات و تغییر مدل ها /help را وارد کنید.\n\nهر سوالی داری بپرس، من پاسخ می‌دهم!  \n\nفقط پیامت رو ارسال کن! "
         );
     } else {
-        sendTelegramMessage($chatId,
+        sendMainKeyboard($chatId,
             "👋 خوش آمدید! من دستیار هوش مصنوعی شما هستم.\nبرای دیدن دستورات و تغییر مدل ها /help را وارد کنید.\n\nهر سوالی داری بپرس، من پاسخ می‌دهم!  \n\nفقط پیامت رو ارسال کن! "
         );
     }
@@ -70,16 +70,67 @@ if (str_starts_with($lower, '/start')) {
 // ----- /help -----
 if ($lower === '/help') {
     $remain_pro = getProTimeRemainingStr($chatId);
-    sendTelegramMessage($chatId,
+    sendMainKeyboard($chatId,
         "📌 دستورات:\n\n" .
         "/start –  شروع ربات 🚀\n" .
         "/help –  اطلاعات و راهنما ℹ️\n" .
         "/newchat –  پاک کردن حافظه چت 🧹\n" .
         "/setmodel –  انتخاب مدل هوش مصنوعی 🤖\n" .
-        "/getpro –  دریافت *رایگان* امکانات PRO 🎁\n" .
-        "/buypro –  خرید امکانات PRO 💳\n" .
-        "🎤 ارسال پیام صوتی –  تبدیل صدا به متن (ویژه خریداران PRO)\n\n$remain_pro"
+        "/usage –  مشاهده مصرف امروز 📊\n" .
+        "/image –  ساخت تصویر با هوش مصنوعی 🖼\n" .
+        "/getpro –  دریافت رایگان امکانات PRO 🎁\n" .
+        "/buypro –  پلن‌های اشتراک و خرید 💳\n" .
+        "🎤 ارسال پیام صوتی –  تبدیل صدا به متن (ویژه پلن‌های پولی)\n" .
+        "👁 ارسال عکس –  تحلیل تصویر؛ سوالتان را زیر عکس بنویسید (ویژه پلن‌های پولی)\n\n$remain_pro"
     );
+    sendButtons($chatId, "یکی از گزینه‌ها را انتخاب کنید:", Bot\Plans::menuButtons());
+    return true;
+}
+
+// ----- /image [description] -----
+if (preg_match('~^/image(?:\s+(.+))?$~su', trim(str_replace("@$botUsername", "", $userText)), $m)) {
+    global $update;
+    handleImageRequest($chatId, $update['message']['from']['id'], trim($m[1] ?? ''));
+    return true;
+}
+
+// ----- /usage -----
+if ($lower === '/usage') {
+    global $isPro;
+    $settings = botServices()->settings;
+
+    $stmt = $db->prepare("SELECT COUNT(*) FROM " . T_MESSAGES . " WHERE user_id = ? AND DATE(created_at) = CURDATE() AND type = 'USER'");
+    $stmt->execute([$userId]);
+    $usedToday = (int) $stmt->fetchColumn();
+
+    // Voice line only for users who have voice-to-text; a failed lookup just hides it.
+    $used = ['chat' => $usedToday];
+    $stmt = $db->prepare("SELECT COUNT(*) FROM " . T_MESSAGES . " WHERE user_id = ? AND created_at >= ? AND type = 'USER'");
+    $stmt->execute([$userId, date('Y-m-01 00:00:00')]);
+    $used['chat_month'] = (int) $stmt->fetchColumn();
+    try {
+        $minutes = voiceMinutesFor($chatId);
+        if ($minutes > 0) {
+            $used['voice_limit'] = $minutes;
+            $stmt = $db->prepare("SELECT COALESCE(SUM(duration_seconds), 0) FROM " . botServices()->settings['table_prefix'] . "voice_usage WHERE telegram_user_id = ? AND DATE(created_at) = CURDATE() AND status IN ('ok', 'pending', 'timeout')");
+            $stmt->execute([$chatId]);
+            $used['voice_seconds'] = (int) $stmt->fetchColumn();
+        }
+        $media = botMedia();
+        $used['image_day'] = $media->used((int) $chatId, 'image', date('Y-m-d 00:00:00'));
+        $used['image_month'] = $media->used((int) $chatId, 'image', date('Y-m-01 00:00:00'));
+        $weekAgo = date('Y-m-d H:i:s', time() - 7 * 86400);
+        $used['image_week'] = $media->used((int) $chatId, 'image', $weekAgo);
+        $stmt = $db->prepare("SELECT COUNT(*) FROM " . $settings['table_prefix'] . "voice_usage WHERE telegram_user_id = ? AND created_at >= ? AND status IN ('ok', 'pending', 'timeout')");
+        $stmt->execute([$chatId, $weekAgo]);
+        $used['voice_week'] = (int) $stmt->fetchColumn();
+        $used['vision'] = $media->used((int) $chatId, 'vision', date('Y-m-d 00:00:00'));
+    } catch (\Throwable $e) {
+        // A failed lookup only leaves those lines at zero.
+    }
+
+    $text = Bot\Plans::usageText($settings, (bool) $isPro, $user['plan'] ?? null, $used, getProTimeRemainingStr($chatId));
+    sendButtons($chatId, $text, [[['text' => '💎 پلن‌های اشتراک', 'callback_data' => 'cmd_buypro']]], "Markdown");
     return true;
 }
 
@@ -147,10 +198,11 @@ if ($lower === '/getpro') {
     $botUsername = $config['telegram']['bot_username']; // e.g. MyCoolBot
     $refLink     = "https://ble.ir/{$botUsername}?start=ref{$userChatId}";
     $text =
-        "💎 *مزایای PRO*\n".
-        "• پیام‌های نامحدود\n".
+        "🎁 *PRO دعوتی*\n".
+        "• " . (int) botServices()->settings['pro_limits']['chat_per_day'] . " پیام در روز\n".
         "• حافظه بلندمدت\n".
-        "• دسترسی به مدل‌های هوشمند 🧠 و فوق هوشمند 🚀\n\n".
+        "• " . (int) botServices()->settings['pro_limits']['image_per_week'] . " تصویر در هفته\n".
+        "• " . (int) botServices()->settings['pro_limits']['voice_per_week'] . " تبدیل صدا به متن در هفته\n\n".
         "✨ *دعوت و کسب PRO*\n".
         "لینک یا بنر شخصی خود را به اشتراک بگذارید. هر دوستی که بپیوندد  به اشتراک *PRO* شما اضافه می‌شود:\n\n".
         "*{$refLink}*\n\n".
@@ -182,54 +234,10 @@ if ($lower === '/buypro') {
     // Real user ID (works in both private & group)
     $userChatId = $update['message']['from']['id'];
 
-    $buttons = [
-        [
-            ['text' => 'بستهٔ هوشمندانه ✅| ۲۳۸ هزار تومان', 'callback_data' => 'buypro_smart'], // 2,380,000 rial
-        ],
-        [
-            ['text' => 'بسته اقتصادی | ۱۱۹ هزار تومان', 'callback_data' => 'buypro_economic'], // 1,190,000
-        ],
-        [
-            ['text' => 'بسته حرفه‌ای | ۳۹۰ هزار تومان', 'callback_data' => 'buypro_pro'], // 3,900,000
-        ],
-    ];
-    $text = "🛒 لطفا بسته مورد نظر خود را انتخاب کنید:\n\n".
-    "---      *بستهٔ هوشمندانه* ✅ 1 ماهه\n".
-    // "\n".
-    "🧠 پاسخ‌های با کیفیت و دقت بالاتر\n".
-    // "💬 ارسال پیام و تصویر تا ۱۰ برابر بیشتر\n".
-    // "📂 بارگذاری عکس و فایل تا ۱۰ برابر\n".
-    // "\n".
-    "⏱️ اعتبار: ۳۰ + ۱۴ روزه\n".
-    // "💰 _قیمت بسته: ۳۳۸ هزار تومان_\n".
-    "🔥 قیمت ویژه: ۲۳۸ هزار تومان\n".
-    "\n".
-    "+ 🎁 ۱۴ روز اعتبار هدیهٔ عید نوروز 🍏\n".
-    "\n".
-    "---      *بسته اقتصادی*\n".
-    "🧠 پاسخ‌های با کیفیت و دقت بالاتر\n".
-    // "💬 ارسال پیام و تصویر تا ۱۰ برابر بیشتر\n".
-    // "🖌️ ویرایش تصاویر با کیفیت بالا\n".
-    // "📂 بارگذاری عکس و فایل تا ۱۰ برابر\n".
-    // "\n".
-    "⏱️ اعتبار: ۲۰ روزه\n".
-    // "💰 _قیمت بسته: ۲۱۹ هزار تومان_\n".
-    "🔥 قیمت ویژه: ۱۱۹ هزار تومان\n".
-    "\n".
-    "---      *بسته حرفه‌ای*\n".
-    "🧠 پاسخ‌های با کیفیت و دقت بالاتر\n".
-    // "💬 ارسال پیام و تصویر تا ۵۰ برابر بیشتر\n".
-    // "🖌️ ویرایش تصاویر با کیفیت بالا\n".
-    // "📂 بارگذاری عکس و فایل تا ۵۰ برابر\n".
-    // "\n".
-    "⏱️ اعتبار: ۶۰ روزه\n".
-    // "💰 _قیمت بسته: ۴۹۰ هزار تومان_\n".
-    "🔥 قیمت ویژه: ۳۹۰ هزار تومان\n\n".
-    "تمام بسته‌ها شامل :\n".
-    "• پیام‌های نامحدود 📩\n".
-    "• حافظه بلندمدت 🧠\n".
-    "• دسترسی به مدل‌های هوشمند 🧠 و فوق هوشمند 🚀\n".
-    "• تبدیل پیام صوتی به متن 🎤\n\n پشتیبانی: @suport_0";
+    global $isPro;
+    $settings = botServices()->settings;
+    $buttons = Bot\Plans::buyButtons($settings);
+    $text = Bot\Plans::listText($settings, (bool) $isPro, $user['plan'] ?? null);
     sendButtons($userChatId, $text, $buttons, "Markdown");
 
     return true;

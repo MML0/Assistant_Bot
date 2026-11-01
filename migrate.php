@@ -115,6 +115,29 @@ try {
         INDEX idx_{$p}voice_user (telegram_user_id, created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
+    // Image generation and image understanding, one row per request.
+    $db->exec("CREATE TABLE IF NOT EXISTS {$p}media_usage (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        telegram_user_id BIGINT NOT NULL,
+        action VARCHAR(16) NOT NULL,
+        provider VARCHAR(32) NOT NULL DEFAULT '',
+        model VARCHAR(120) NOT NULL DEFAULT '',
+        status VARCHAR(16) NOT NULL,
+        created_at DATETIME NOT NULL,
+        INDEX idx_{$p}media_user (telegram_user_id, action, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    // Subscription plan of the user (NULL: free, or PRO from before plans existed).
+    if (!$db->query("SHOW COLUMNS FROM {$U} LIKE 'plan'")->fetch()) {
+        $db->exec("ALTER TABLE {$U} ADD COLUMN plan VARCHAR(32) NULL DEFAULT NULL");
+    }
+
+    // First run of the dashboard version: paid providers answer first (MetisAI, then GapGPT).
+    $overlayFile = __DIR__ . '/storage/admin_settings.json';
+    if (!is_file($overlayFile) && is_dir(dirname($overlayFile))) {
+        file_put_contents($overlayFile, json_encode(['routing' => ['mode' => 'paid_only']]));
+    }
+
     echo "✔ New tables ready: {$U}, {$M}, {$p}payments, {$p}premium_entitlements, {$p}voice_usage\n";
 
     // ------------------------------ COPY OLD DATA ------------------------------
