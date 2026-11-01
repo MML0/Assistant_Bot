@@ -138,18 +138,20 @@ if ($lower === '/usage') {
 if ($lower === '/setmodel') {
 
     // Three tiers instead of GPT model names; the backend maps each tier to real models.
-    $tiers = botServices()->settings['tiers'];
+    global $isPro;
+    $settings = botServices()->settings;
+    $tiers = $settings['tiers'];
+    // Plan holders see the tiers of their plan; everyone else sees all of them as an offer.
+    $plan = Bot\Plans::active($settings, (bool) $isPro, $user['plan'] ?? null);
     $row = [];
     foreach ($tiers as $key => $tier) {
+        if ($plan !== null && !Bot\Plans::tierAllowed($settings, true, $user['plan'], $key)) continue;
         $row[] = ['text' => $tier['label'], 'callback_data' => 'setmodel_' . $key];
     }
     $buttons = [$row];
 
     $remain_pro = getProTimeRemainingStr($chatId);
-    $stmt = $db->prepare("SELECT model FROM " . T_USERS . " WHERE chat_id = ?");
-    $stmt->execute([$chatId]);
-    $userModel = $stmt->fetchColumn();
-    $current = tierLabel(isset($tiers[$userModel]) ? $userModel : botServices()->settings['default_tier']);
+    $current = tierLabel(getUserTier($chatId));
     $text = "🤖 *مدل فعلی شما:* $current\n\n"
         . "⚡ عادی: سریع، برای گفتگوهای روزمره\n"
         . "🧠 هوشمند: پاسخ‌های دقیق‌تر\n"

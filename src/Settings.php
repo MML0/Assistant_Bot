@@ -55,9 +55,9 @@ PROMPT,
             'free_limits' => ['chat_per_day' => 5, 'voice_minutes_per_day' => 0, 'image_per_day' => 0, 'image_per_month' => 0, 'vision_per_day' => 0, 'tiers' => ['normal']],
             'pro_limits'  => ['chat_per_day' => 15, 'voice_minutes_per_day' => 3, 'voice_per_week' => 1, 'image_per_day' => 1, 'image_per_week' => 1, 'image_per_month' => 0, 'vision_per_day' => 0, 'tiers' => ['normal']],
             'plans' => [
-                'basic' => ['title' => 'پلن پایه', 'price_toman' => 89000, 'days' => 30, 'chat_per_day' => 30, 'voice_minutes_per_day' => 30, 'image_per_day' => 0, 'image_per_month' => 0, 'vision_per_day' => 0, 'enabled' => true, 'tiers' => ['normal', 'smart', 'extra']],
-                'advanced' => ['title' => 'پلن حرفه‌ای', 'price_toman' => 149000, 'days' => 30, 'chat_per_day' => 50, 'voice_minutes_per_day' => 30, 'image_per_day' => 5, 'image_per_month' => 60, 'vision_per_day' => 10, 'enabled' => true, 'tiers' => ['normal', 'smart', 'extra']],
-                'ultimate' => ['title' => 'پلن پرو', 'price_toman' => 299000, 'days' => 30, 'chat_per_day' => 250, 'voice_minutes_per_day' => 30, 'image_per_day' => 15, 'image_per_month' => 200, 'vision_per_day' => 30, 'enabled' => true, 'tiers' => ['normal', 'smart', 'extra']],
+                'basic' => ['title' => 'پلن پایه', 'price_toman' => 89000, 'days' => 30, 'chat_per_day' => 30, 'voice_minutes_per_day' => 30, 'image_per_day' => 0, 'image_per_month' => 0, 'vision_per_day' => 0, 'enabled' => true, 'tiers' => ['smart']],
+                'advanced' => ['title' => 'پلن حرفه‌ای', 'price_toman' => 149000, 'days' => 30, 'chat_per_day' => 50, 'voice_minutes_per_day' => 30, 'image_per_day' => 5, 'image_per_month' => 60, 'vision_per_day' => 10, 'enabled' => true, 'tiers' => ['smart']],
+                'ultimate' => ['title' => 'پلن پرو', 'price_toman' => 299000, 'days' => 30, 'chat_per_day' => 250, 'voice_minutes_per_day' => 30, 'image_per_day' => 15, 'image_per_month' => 200, 'vision_per_day' => 30, 'enabled' => true, 'tiers' => ['smart', 'extra']],
             ],
 
             // Three tiers shown to users. Free models are tried in this order (validated
@@ -72,8 +72,8 @@ PROMPT,
                     ],
                     // Paid MetisAI models, in order: a model MetisAI reports as retired is skipped
                     // for a day and the next one answers (gpt-4.1-nano was shut down on 2026-10-23).
-                    'paid_models' => ['gpt-5.4-nano', 'gpt-5-nano', 'gpt-4o-mini'],
-                    'gapgpt_models' => ['gpt-5.4-nano', 'gpt-5-nano', 'gpt-4o-mini'],
+                    'paid_models' => ['gpt-5-nano', 'gpt-4o-mini'],
+                    'gapgpt_models' => ['gpt-4.1-nano', 'gpt-5-nano'],
                 ],
                 'smart' => [
                     'label' => '🧠 هوشمند',
@@ -101,7 +101,7 @@ PROMPT,
             // Free models of these tiers are tried next if a tier's own free models all fail.
             'tier_fallback' => ['extra' => ['smart', 'normal'], 'smart' => ['normal'], 'normal' => []],
             'default_tier' => 'normal',   // free users always use this tier
-            'pro_tier'     => 'smart',    // set when a user buys PRO (if they were on normal)
+            'pro_tier'     => 'smart',    // set when a user buys a plan; every plan starts here
 
             'openrouter' => [
                 'api_key'          => '',

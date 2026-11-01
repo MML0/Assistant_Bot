@@ -31,7 +31,13 @@ test('plans: media limits and tiers by status', function () use ($planSettings) 
     T::eq(15, Plans::limits($planSettings, true, 'ultimate')['image_per_day']);
     T::eq(200, Plans::limits($planSettings, true, 'ultimate')['image_per_month']);
     T::ok(!Plans::tierAllowed($planSettings, false, null, 'extra'), 'free cannot use extra');
-    T::ok(Plans::tierAllowed($planSettings, true, 'basic', 'extra'));
+    T::ok(!Plans::tierAllowed($planSettings, true, 'basic', 'extra'));
+    foreach (['basic', 'advanced', 'ultimate'] as $plan) {
+        T::eq('smart', Plans::limits($planSettings, true, $plan)['tiers'][0], "$plan starts on smart");
+        T::ok(!Plans::tierAllowed($planSettings, true, $plan, 'normal'), "$plan has no normal");
+    }
+    T::ok(Plans::tierAllowed($planSettings, true, 'ultimate', 'extra'));
+    T::eq(['normal'], Plans::limits($planSettings, false, null)['tiers'], 'free stays on normal');
 });
 
 test('plans: invoice amounts are in rial', function () use ($planSettings) {
